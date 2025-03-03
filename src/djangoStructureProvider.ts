@@ -30,6 +30,13 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       return Promise.resolve([]);
     }
 
+    // Depurar el elemento actual
+    if (element) {
+      console.log('Tipo de elemento:', element.contextValue);
+      console.log('Etiqueta:', element.label);
+      console.log('Tiene campos:', (element as any).modelFields ? 'Sí' : 'No');
+    }
+
     if (!element) {
       // Nivel raíz - mostrar la estructura principal del proyecto
       return this.getProjectStructure();
@@ -56,9 +63,11 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       return this.getSettings(element.resourceUri!.fsPath);
     } else if (element.contextValue === 'model') {
       // Mostrar los campos de un modelo
+      console.log('Procesando modelo para mostrar campos');
       return this.getModelFields(element);
     }
-
+    
+    console.log('No se encontró un manejador para el tipo:', element?.contextValue);
     return [];
   }
 
@@ -220,10 +229,20 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
 
   private async getModels(modelsPath: string): Promise<DjangoTreeItem[]> {
     const models = await this.analyzer.extractModels(modelsPath);
+    console.log('Modelos encontrados:', models.length);
+    
     return models.map(model => {
+      console.log(`Modelo: ${model.name}, Campos: ${model.fields?.length || 0}`);
+      if (model.fields) {
+        console.log('Campos del modelo:', JSON.stringify(model.fields));
+      }
+      
+      // Crear una copia de los campos para evitar problemas de referencia
+      const fieldsData = model.fields ? [...model.fields] : [];
+      
       const modelItem = new DjangoTreeItem(
         model.name,
-        model.fields && model.fields.length > 0 
+        fieldsData.length > 0 
           ? vscode.TreeItemCollapsibleState.Collapsed 
           : vscode.TreeItemCollapsibleState.None,
         {
@@ -238,10 +257,13 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       
       // Almacenar los campos del modelo en el elemento para acceder a ellos más tarde
       modelItem.tooltip = `Modelo: ${model.name}`;
-      modelItem.description = `${model.fields?.length || 0} campos`;
+      modelItem.description = `${fieldsData.length} campos`;
       
-      // Guardar los campos en una propiedad personalizada
-      (modelItem as any).modelFields = model.fields;
+      // No podemos modificar command directamente porque es de solo lectura
+      // En su lugar, almacenamos los campos como datos personalizados
+      
+      // También guardar en una propiedad personalizada para mayor seguridad
+      (modelItem as any).modelFields = fieldsData;
       
       return modelItem;
     });
@@ -339,7 +361,32 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
     const fields = (modelItem as any).modelFields || [];
     const modelsPath = modelItem.resourceUri!.fsPath;
     
+    console.log('Modelo:', modelItem.label);
+    console.log('Campos encontrados:', fields.length);
+    console.log('Campos:', JSON.stringify(fields));
+    
+    // Si no hay campos, intentar obtenerlos de nuevo
+    if (fields.length === 0) {
+      console.log('No se encontraron campos almacenados, intentando obtenerlos de nuevo');
+      try {
+        // Intentar extraer el modelo de nuevo para obtener sus campos
+        const models = await this.analyzer.extractModels(modelsPath);
+        const modelName = modelItem.label?.toString() || '';
+        const model = models.find(m => m.name === modelName);
+        
+        if (model && model.fields && model.fields.length > 0) {
+          console.log(`Se encontraron ${model.fields.length} campos para el modelo ${modelName}`);
+          // Actualizar los campos en el elemento
+          (modelItem as any).modelFields = model.fields;
+          return this.getModelFields(modelItem); // Llamada recursiva con los campos actualizados
+        }
+      } catch (error) {
+        console.error('Error al intentar obtener campos del modelo:', error);
+      }
+    }
+    
     return fields.map((field: any) => {
+      console.log(`Creando elemento para el campo: ${field.name}, tipo: ${field.fieldType || field.type}, isProperty: ${field.isProperty}`);
       const fieldItem = new DjangoTreeItem(
         field.name,
         vscode.TreeItemCollapsibleState.None,
@@ -349,10 +396,19 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
           arguments: [modelsPath, field.lineNumber]
         },
         vscode.Uri.file(modelsPath),
-        'model-field'
+        field.isProperty ? 'model-property' : 'model-field'
       );
-      fieldItem.iconPath = new vscode.ThemeIcon('symbol-field');
-      fieldItem.description = field.fieldType;
+      
+      // Usar un icono diferente para propiedades
+      if (field.isProperty) {
+        fieldItem.iconPath = new vscode.ThemeIcon('symbol-method');
+      } else {
+        fieldItem.iconPath = new vscode.ThemeIcon('symbol-field');
+      }
+      
+      // Usar fieldType o type, dependiendo de cuál esté disponible
+      fieldItem.description = field.fieldType || field.type || 'Unknown';
+      fieldItem.tooltip = `${field.isProperty ? 'Propiedad' : 'Campo'}: ${field.name}\nTipo: ${field.fieldType || field.type || 'Unknown'}`;
       return fieldItem;
     });
   }

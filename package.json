@@ -3,6 +3,10 @@
   "displayName": "Django Structure Explorer",
   "description": "Explorador de estructura de proyectos Django al estilo PyCharm",
   "version": "0.1.0",
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:Dos2Locos/django-structure-explorer-vscode.git"
+  },
   "engines": {
     "vscode": "^1.60.0"
   },

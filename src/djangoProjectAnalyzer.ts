@@ -10,6 +10,14 @@ const stat = util.promisify(fs.stat);
 export interface DjangoModel {
   name: string;
   lineNumber: number;
+  fields?: ModelField[];
+}
+
+export interface ModelField {
+  name: string;
+  fieldType: string;
+  lineNumber: number;
+  isProperty?: boolean; // Indicar si es un método con decorador @property
 }
 
 export interface DjangoView {
@@ -104,18 +112,279 @@ export class DjangoProjectAnalyzer {
       const content = await readFile(modelsPath, 'utf8');
       const lines = content.split('\n');
       
-      // Expresión regular para encontrar clases de modelo
-      const modelRegex = /^class\s+(\w+)\s*\(\s*models\.Model/;
+      // Analizar las importaciones para detectar alias de models o importaciones directas
+      const importAliases: {[key: string]: string} = {};
+      const directImports: string[] = [];
       
-      for (let i = 0; i < lines.length; i++) {
-        const match = lines[i].match(modelRegex);
-        if (match) {
-          models.push({
-            name: match[1],
-            lineNumber: i
-          });
+      // Buscar importaciones como "from django.db import models" o "from django.db.models import CharField, TextField"
+      for (let i = 0; i < 30 && i < lines.length; i++) { // Revisar solo las primeras líneas
+        const line = lines[i].trim();
+        
+        // Detectar alias de models
+        const aliasMatch = line.match(/^from\s+django\.db\s+import\s+models\s+as\s+(\w+)/);
+        if (aliasMatch) {
+          importAliases['models'] = aliasMatch[1];
+          console.log(`Detectado alias para models: ${aliasMatch[1]}`);
+        }
+        
+        // Detectar importaciones directas de tipos de campo
+        const directImportMatch = line.match(/^from\s+django\.db\.models\s+import\s+(.+)$/);
+        if (directImportMatch) {
+          const imports = directImportMatch[1].split(',').map(i => i.trim());
+          directImports.push(...imports);
+          console.log(`Detectadas importaciones directas: ${imports.join(', ')}`);
         }
       }
+      
+      // Expresión regular para encontrar clases de modelo
+      // Ahora también busca clases que heredan de Model (sin el prefijo models.)
+      const modelRegex = /^class\s+(\w+)\s*\(\s*(models\.Model|Model)\b/;
+      // Expresión regular para encontrar el inicio de la clase Meta
+      const metaClassRegex = /^\s+class\s+Meta\s*:/;
+      // Expresión regular para detectar decoradores @property
+      const propertyDecoratorRegex = /^\s*@property\s*$/;
+      
+      let currentModel: DjangoModel | null = null;
+      let inModelDefinition = false;
+      let inMetaClass = false;
+      let classIndentation = 0;
+      let fieldStartIndentation = 0;
+      let currentFieldName = '';
+      let currentFieldType = '';
+      let currentFieldLine = 0;
+      let parenthesesCount = 0; // Para rastrear paréntesis abiertos/cerrados
+      let isPropertyMethod = false; // Para rastrear si el próximo método tiene el decorador @property
+      
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const indentMatch = line.match(/^(\s*)/);
+        const indentation = indentMatch ? indentMatch[1].length : 0;
+        
+        // Detectar decorador @property
+        if (line.trim().match(propertyDecoratorRegex)) {
+          isPropertyMethod = true;
+          continue;
+        }
+        
+        // Detectar una nueva clase de modelo
+        const modelMatch = line.match(modelRegex);
+        if (modelMatch) {
+          // Guardar el modelo anterior si existe
+          if (currentModel) {
+            models.push(currentModel);
+          }
+          
+          // Crear un nuevo modelo
+          currentModel = {
+            name: modelMatch[1],
+            lineNumber: i,
+            fields: []
+          };
+          
+          // Iniciar el seguimiento de la definición del modelo
+          inModelDefinition = true;
+          inMetaClass = false;
+          classIndentation = indentation;
+          isPropertyMethod = false;
+          continue;
+        }
+        
+        // Si no estamos dentro de un modelo, continuar
+        if (!currentModel || !inModelDefinition) {
+          isPropertyMethod = false;
+          continue;
+        }
+        
+        // Si es una línea vacía, continuar
+        if (line.trim() === '') {
+          continue;
+        }
+        
+        // Detectar si estamos entrando en la clase Meta
+        if (line.match(metaClassRegex)) {
+          inMetaClass = true;
+          isPropertyMethod = false;
+          continue;
+        }
+        
+        // Si la indentación es menor o igual a la de la clase, hemos salido del modelo
+        if (indentation <= classIndentation && line.trim() !== '') {
+          // Guardar el modelo actual
+          models.push(currentModel);
+          currentModel = null;
+          inModelDefinition = false;
+          inMetaClass = false;
+          isPropertyMethod = false;
+          continue;
+        }
+        
+        // Ignorar líneas dentro de la clase Meta
+        if (inMetaClass) {
+          continue;
+        }
+        
+        // Detectar método con decorador @property
+        const methodMatch = line.match(/^\s+def\s+(\w+)\s*\(/);
+        if (isPropertyMethod && methodMatch) {
+          currentModel.fields!.push({
+            name: methodMatch[1],
+            fieldType: 'property',
+            lineNumber: i,
+            isProperty: true
+          });
+          isPropertyMethod = false;
+          continue;
+        }
+        
+        // Construir expresión regular para detectar campos considerando alias e importaciones directas
+        let fieldRegexPatterns = [
+          // Patrón estándar: name = models.CharField(...)
+          `^\\s+(\\w+)\\s*=\\s*models\\.(\\w+)\\s*\\(?(.*)`
+        ];
+        
+        // Añadir patrón para alias: name = m.CharField(...)
+        if (importAliases['models']) {
+          fieldRegexPatterns.push(`^\\s+(\\w+)\\s*=\\s*${importAliases['models']}\\.(\\w+)\\s*\\(?(.*)`)
+        }
+        
+        // Añadir patrón para importaciones directas: name = CharField(...)
+        if (directImports.length > 0) {
+          const directImportsPattern = directImports.join('|');
+          fieldRegexPatterns.push(`^\\s+(\\w+)\\s*=\\s*(${directImportsPattern})\\s*\\(?(.*)`);
+        }
+        
+        // Intentar cada patrón
+        let fieldMatch = null;
+        let matchedPattern = '';
+        for (const pattern of fieldRegexPatterns) {
+          const regex = new RegExp(pattern);
+          const match = line.match(regex);
+          if (match) {
+            fieldMatch = match;
+            matchedPattern = pattern;
+            break;
+          }
+        }
+        
+        if (fieldMatch) {
+          // Si estábamos procesando un campo anterior, añadirlo al modelo
+          if (currentFieldName && currentFieldType) {
+            currentModel.fields!.push({
+              name: currentFieldName,
+              fieldType: currentFieldType,
+              lineNumber: currentFieldLine
+            });
+          }
+          
+          // Iniciar el seguimiento de un nuevo campo
+          currentFieldName = fieldMatch[1];
+          
+          // El tipo de campo depende del patrón que coincidió
+          if (matchedPattern.includes('(\\w+)\\.(\\w+)')) {
+            // Patrón con prefijo (models.CharField o alias.CharField)
+            currentFieldType = fieldMatch[2];
+          } else {
+            // Patrón de importación directa (CharField)
+            currentFieldType = fieldMatch[2];
+          }
+          
+          currentFieldLine = i;
+          fieldStartIndentation = indentation;
+          
+          // Contar paréntesis abiertos y cerrados en esta línea
+          const openParens = (fieldMatch[fieldMatch.length - 1].match(/\(/g) || []).length;
+          const closeParens = (fieldMatch[fieldMatch.length - 1].match(/\)/g) || []).length;
+          parenthesesCount = openParens - closeParens;
+          
+          // Si los paréntesis están equilibrados, el campo está completo en esta línea
+          if (parenthesesCount === 0) {
+            currentModel.fields!.push({
+              name: currentFieldName,
+              fieldType: currentFieldType,
+              lineNumber: currentFieldLine
+            });
+            currentFieldName = '';
+            currentFieldType = '';
+          }
+        }
+        // Continuación de un campo de múltiples líneas
+        else if (currentFieldName && currentFieldType && parenthesesCount > 0) {
+          // Contar paréntesis en esta línea
+          const openParens = (line.match(/\(/g) || []).length;
+          const closeParens = (line.match(/\)/g) || []).length;
+          parenthesesCount += openParens - closeParens;
+          
+          // Si los paréntesis están equilibrados, el campo está completo
+          if (parenthesesCount === 0) {
+            currentModel.fields!.push({
+              name: currentFieldName,
+              fieldType: currentFieldType,
+              lineNumber: currentFieldLine
+            });
+            currentFieldName = '';
+            currentFieldType = '';
+          }
+        }
+        // Nueva línea con la misma indentación que el nivel de campo, pero no es continuación
+        else if (indentation === fieldStartIndentation && !line.trim().startsWith('#')) {
+          // Verificar si es un nuevo campo con cualquier formato no capturado anteriormente
+          const otherFieldRegex = /^\s+(\w+)\s*=\s*(\w+)(?:\.(\w+))?\s*\(?(.*)/;
+          const otherFieldMatch = line.match(otherFieldRegex);
+          
+          if (otherFieldMatch) {
+            // Si estábamos procesando un campo anterior, añadirlo al modelo
+            if (currentFieldName && currentFieldType) {
+              currentModel.fields!.push({
+                name: currentFieldName,
+                fieldType: currentFieldType,
+                lineNumber: currentFieldLine
+              });
+            }
+            
+            // Iniciar el seguimiento de un nuevo campo
+            currentFieldName = otherFieldMatch[1];
+            // El tipo de campo puede ser con o sin prefijo
+            currentFieldType = otherFieldMatch[3] || otherFieldMatch[2];
+            currentFieldLine = i;
+            
+            // Contar paréntesis abiertos y cerrados en esta línea
+            const openParens = (otherFieldMatch[4].match(/\(/g) || []).length;
+            const closeParens = (otherFieldMatch[4].match(/\)/g) || []).length;
+            parenthesesCount = openParens - closeParens;
+            
+            // Si los paréntesis están equilibrados, el campo está completo en esta línea
+            if (parenthesesCount === 0) {
+              currentModel.fields!.push({
+                name: currentFieldName,
+                fieldType: currentFieldType,
+                lineNumber: currentFieldLine
+              });
+              currentFieldName = '';
+              currentFieldType = '';
+            }
+          }
+        }
+      }
+      
+      // Añadir el último campo si existe
+      if (currentFieldName && currentFieldType && currentModel) {
+        currentModel.fields!.push({
+          name: currentFieldName,
+          fieldType: currentFieldType,
+          lineNumber: currentFieldLine
+        });
+      }
+      
+      // Añadir el último modelo si existe
+      if (currentModel) {
+        models.push(currentModel);
+      }
+      
+      console.log(`Modelos extraídos: ${models.length}`);
+      for (const model of models) {
+        console.log(`Modelo: ${model.name}, Campos: ${model.fields?.length || 0}`);
+      }
+      
     } catch (error) {
       console.error(`Error al analizar modelos: ${error}`);
     }
