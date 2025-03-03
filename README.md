@@ -1,50 +1,117 @@
 # Django Structure Explorer
 
-Una extensión para Visual Studio Code que proporciona una vista de estructura de proyectos Django similar a PyCharm.
+![Django Structure Explorer](https://raw.githubusercontent.com/Dos2Locos/django-structure-explorer-vscode/main/images/icon.png)
 
-## Características
+A Visual Studio Code extension that provides a PyCharm-like Django project structure explorer, making it easier to navigate and understand your Django projects.
 
-- Vista de árbol de la estructura del proyecto Django
-- Navegación rápida a modelos, vistas, URLs y clases del admin
-- Agrupación por aplicaciones Django
-- Visualización de configuraciones (settings)
-- Acceso directo a archivos importantes del proyecto
+## Features
 
-## Requisitos
+- **Project Structure Tree View**: Quickly visualize your entire Django project structure
+- **Smart Django Detection**: Automatically identifies Django apps, models, views, and more
+- **Model Field Explorer**: View detailed information about model fields and their types
+- **Admin Class Detection**: Navigate to admin classes and their associated models
+- **URL Patterns**: Explore URL patterns and their associated views
+- **Settings Explorer**: Browse through your Django settings
+- **Property Method Support**: Identifies and displays @property methods in models
 
-- Visual Studio Code v1.60.0 o superior
-- Proyecto Django
+## Why Use Django Structure Explorer?
 
-## Uso
+If you're transitioning from PyCharm to VS Code or simply want a better way to navigate your Django projects, this extension provides:
 
-1. Abre un proyecto Django en VSCode
-2. La extensión se activará automáticamente al detectar el archivo `manage.py`
-3. Accede a la vista "Django Explorer" en el panel lateral del explorador
-4. Navega por la estructura de tu proyecto Django
+- **Improved Navigation**: Quickly jump to any component in your Django project
+- **Better Understanding**: Visualize the relationships between different parts of your project
+- **Time Saving**: No more searching through files to find models, views, or URLs
+- **Enhanced Productivity**: Focus on coding, not on finding files
 
-## Configuración
+## Installation
 
-Esta extensión no requiere configuración adicional.
+Install this extension from the VS Code Marketplace:
 
-## Notas de desarrollo
+1. Open VS Code
+2. Go to Extensions (Ctrl+Shift+X)
+3. Search for "Django Structure Explorer"
+4. Click Install
 
-Para contribuir al desarrollo de esta extensión:
-
-1. Clona este repositorio
-2. Ejecuta `npm install`
-3. Abre el proyecto en VSCode
-4. Presiona F5 para iniciar una nueva ventana con la extensión cargada
-5. Realiza cambios en el código
-6. Recarga la ventana de VSCode para ver los cambios aplicados
-
-## Solución de problemas git
-
-Si al intentar hacer `git pull` aparece el error "refusing to merge unrelated histories", 
-utiliza el siguiente comando:
+Or install using the VS Code Quick Open (Ctrl+P):
 
 ```
-git pull origin main --allow-unrelated-histories
+ext install Dos2Locos.django-structure-explorer
 ```
 
-Este error suele ocurrir cuando el repositorio local y el remoto comenzaron como proyectos 
-separados sin un historial común.
+## Usage
+
+1. Open a Django project in VS Code
+2. The extension activates automatically when it detects a `manage.py` file
+3. Access the "Django Explorer" view in the Explorer sidebar
+4. Navigate through your Django project structure
+
+### Exploring Models
+
+Click on any model to see its fields and properties. The extension shows:
+
+- Field names and types
+- Property methods (with a distinct icon)
+- Direct navigation to field definitions
+
+### Exploring Views
+
+Browse through your views with information about:
+
+- Function-based views
+- Class-based views
+- Direct navigation to view definitions
+
+### Exploring URLs
+
+Examine your URL patterns with details about:
+
+- URL patterns
+- Associated views
+- URL namespaces
+
+## Requirements
+
+- Visual Studio Code v1.60.0 or higher
+- A Django project
+
+## Extension Settings
+
+This extension works out of the box with no additional configuration required.
+
+## Known Issues
+
+- Complex custom model fields may not be detected correctly
+- Very large Django projects might experience slight performance delays
+
+## Roadmap
+
+Future plans for this extension include:
+
+- Support for Django templates exploration
+- Integration with Django REST Framework
+- Custom field type detection improvements
+- Performance optimizations for large projects
+- Theme-aware icons and styling
+
+## Contributing
+
+Contributions are welcome! To contribute to this extension:
+
+1. Fork the repository
+2. Clone your fork
+3. Run `npm install`
+4. Make your changes
+5. Test your changes by pressing F5 to launch a new VS Code window with the extension loaded
+6. Submit a pull request
+
+## License
+
+This extension is licensed under the [MIT License](LICENSE.md).
+
+## About
+
+Developed by [Dos2Locos](https://github.com/Dos2Locos) to make Django development in VS Code more enjoyable and productive.
+
+---
+
+**Enjoy coding with Django Structure Explorer!**
