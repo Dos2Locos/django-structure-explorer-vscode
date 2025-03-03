@@ -136,9 +136,48 @@ export class DjangoProjectAnalyzer {
         }
       }
       
+      // Almacenar las clases base importadas que podrían ser modelos
+      const importedBaseClasses: {[key: string]: string} = {};
+      
+      // Buscar importaciones de clases base personalizadas
+      for (let i = 0; i < 30 && i < lines.length; i++) {
+        const line = lines[i].trim();
+        
+        // Detectar importaciones de clases base
+        const baseClassMatch = line.match(/^from\s+([\w.]+)\s+import\s+([\w,\s]+)$/);
+        if (baseClassMatch) {
+          const module = baseClassMatch[1];
+          const imports = baseClassMatch[2].split(',').map(i => i.trim());
+          
+          imports.forEach(importName => {
+            importedBaseClasses[importName] = module;
+            console.log(`Detectada posible clase base: ${importName} desde ${module}`);
+          });
+        }
+      }
+      
       // Expresión regular para encontrar clases de modelo
-      // Ahora también busca clases que heredan de Model (sin el prefijo models.)
-      const modelRegex = /^class\s+(\w+)\s*\(\s*(models\.Model|Model)\b/;
+      // Ahora busca cualquier clase que herede de Model, models.Model, o cualquier otra clase base
+      const modelRegex = /^class\s+(\w+)\s*\((.*?)\):/;
+      
+      // Función para verificar si una clase base es un modelo Django
+      const isDjangoModel = (baseClass: string): boolean => {
+        // Casos directos
+        if (baseClass === 'models.Model' || baseClass === 'Model') {
+          return true;
+        }
+        
+        // Verificar clases importadas
+        const cleanBase = baseClass.trim();
+        if (importedBaseClasses[cleanBase]) {
+          const module = importedBaseClasses[cleanBase];
+          return module.includes('django.db.models') || 
+                 module.includes('django.contrib.gis.db.models') ||
+                 module.endsWith('.models');
+        }
+        
+        return false;
+      };
       // Expresión regular para encontrar el inicio de la clase Meta
       const metaClassRegex = /^\s+class\s+Meta\s*:/;
       // Expresión regular para detectar decoradores @property
@@ -169,20 +208,26 @@ export class DjangoProjectAnalyzer {
         // Detectar una nueva clase de modelo
         const modelMatch = line.match(modelRegex);
         if (modelMatch) {
-          // Guardar el modelo anterior si existe
-          if (currentModel) {
-            models.push(currentModel);
+          // Analizar las clases base
+          const baseClasses = modelMatch[2].split(',').map(base => base.trim());
+          const isModelClass = baseClasses.some(base => isDjangoModel(base));
+          
+          if (isModelClass) {
+            // Guardar el modelo anterior si existe
+            if (currentModel) {
+              models.push(currentModel);
+            }
+            
+            // Crear un nuevo modelo
+            currentModel = {
+              name: modelMatch[1],
+              lineNumber: i,
+              fields: []
+            };
+          
+            // Iniciar el seguimiento de la definición del modelo
+            inModelDefinition = true;
           }
-          
-          // Crear un nuevo modelo
-          currentModel = {
-            name: modelMatch[1],
-            lineNumber: i,
-            fields: []
-          };
-          
-          // Iniciar el seguimiento de la definición del modelo
-          inModelDefinition = true;
           inMetaClass = false;
           classIndentation = indentation;
           isPropertyMethod = false;
