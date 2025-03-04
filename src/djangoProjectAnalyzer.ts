@@ -136,9 +136,73 @@ export class DjangoProjectAnalyzer {
         }
       }
       
-      // Expresión regular para encontrar clases de modelo
-      // Ahora también busca clases que heredan de Model (sin el prefijo models.)
-      const modelRegex = /^class\s+(\w+)\s*\(\s*(models\.Model|Model)\b/;
+      // Mantener un registro de las clases que son modelos
+      const modelClasses = new Set<string>();
+      
+      // Primera pasada: identificar todas las clases que heredan de Model
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (line.startsWith('class ')) {
+          const classMatch = line.match(/^class\s+(\w+)\s*\(([^)]+)\)/);          
+          if (classMatch) {
+            const className = classMatch[1];
+            const baseClasses = classMatch[2].split(',').map(c => c.trim());
+            
+            // Lista de clases base comunes que indican que es un modelo
+            const modelBaseClasses = [
+              'Model',
+              'models.Model',
+              'TranslatableModel',
+              'MPTTModel',
+              'AbstractUser',
+              'AbstractBaseUser',
+              'TimeStampedModel',
+              'BaseModel',
+              'DjangoModel',
+              'ChangeControlMixin',  // Aunque es un mixin, lo incluimos para detectar modelos que lo usan
+              'SoftDeletableModel',
+              'TimestampedModel',
+              'UUIDModel',
+              'TreeModel',
+              'Page',
+              'AbstractPage',
+              'AbstractModel',
+              'AbstractBaseModel'
+            ];
+            
+            // Verificar si hereda de alguna clase base conocida
+            if (baseClasses.some(base => modelBaseClasses.includes(base.split('.')?.pop() || base))) {
+              modelClasses.add(className);
+            }
+          }
+        }
+      }
+      
+      // Segunda pasada: identificar clases que heredan de modelos ya identificados
+      let newModelsFound = true;
+      while (newModelsFound) {
+        newModelsFound = false;
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (line.startsWith('class ')) {
+            const classMatch = line.match(/^class\s+(\w+)\s*\(([^)]+)\)/);            
+            if (classMatch) {
+              const className = classMatch[1];
+              if (!modelClasses.has(className)) {
+                const baseClasses = classMatch[2].split(',').map(c => c.trim());
+                // Si alguna clase base es un modelo conocido, esta también es un modelo
+                if (baseClasses.some(base => modelClasses.has(base))) {
+                  modelClasses.add(className);
+                  newModelsFound = true;
+                }
+              }
+            }
+          }
+        }
+      }
+      
+      // Expresión regular para encontrar el inicio de una clase
+      const classRegex = /^class\s+(\w+)\s*\(/;
       // Expresión regular para encontrar el inicio de la clase Meta
       const metaClassRegex = /^\s+class\s+Meta\s*:/;
       // Expresión regular para detectar decoradores @property
@@ -166,9 +230,9 @@ export class DjangoProjectAnalyzer {
           continue;
         }
         
-        // Detectar una nueva clase de modelo
-        const modelMatch = line.match(modelRegex);
-        if (modelMatch) {
+        // Detectar una nueva clase
+        const classMatch = line.match(classRegex);
+        if (classMatch && modelClasses.has(classMatch[1])) {
           // Guardar el modelo anterior si existe
           if (currentModel) {
             models.push(currentModel);
@@ -176,7 +240,7 @@ export class DjangoProjectAnalyzer {
           
           // Crear un nuevo modelo
           currentModel = {
-            name: modelMatch[1],
+            name: classMatch[1],
             lineNumber: i,
             fields: []
           };
