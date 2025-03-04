@@ -142,7 +142,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
     // Add configuration files group
     const configItem = new DjangoTreeItem(
       'Configuration',
-      vscode.TreeItemCollapsibleState.Collapsed,
+      vscode.TreeItemCollapsibleState.Expanded,  // Mostrar expandido por defecto
       undefined,
       undefined,
       'config'
@@ -153,7 +153,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
     // Add applications group
     const appsItem = new DjangoTreeItem(
       'Applications',
-      vscode.TreeItemCollapsibleState.Collapsed,
+      vscode.TreeItemCollapsibleState.Expanded,  // Mostrar expandido por defecto
       undefined,
       undefined,
       'apps'
@@ -161,7 +161,19 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
     appsItem.iconPath = new vscode.ThemeIcon('layers');
     items.push(appsItem);
 
-    return items;
+    return this.sortItems(items);
+  }
+
+  private sortItems(items: DjangoTreeItem[]): DjangoTreeItem[] {
+    const sortOrder = vscode.workspace.getConfiguration('djangoStructureExplorer').get('sortOrder', 'alphabetical');
+    
+    if (sortOrder === 'alphabetical') {
+      return items.sort((a, b) => a.label.toString().localeCompare(b.label.toString()));
+    } else if (sortOrder === 'alphabeticalDesc') {
+      return items.sort((a, b) => b.label.toString().localeCompare(a.label.toString()));
+    }
+    
+    return items; // codeOrder - mantener el orden original
   }
 
   private async getAppStructure(appPath: string): Promise<DjangoTreeItem[]> {
@@ -245,15 +257,15 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
 
   private async getModels(modelsPath: string): Promise<DjangoTreeItem[]> {
     const models = await this.analyzer.extractModels(modelsPath);
-    console.log('Modelos encontrados:', models.length);
+    console.log('Models found:', models.length);
     
-    return models.map(model => {
-      console.log(`Modelo: ${model.name}, Campos: ${model.fields?.length || 0}`);
+    const items = models.map(model => {
+      console.log(`Model: ${model.name}, Fields: ${model.fields?.length || 0}`);
       if (model.fields) {
-        console.log('Campos del modelo:', JSON.stringify(model.fields));
+        console.log('Model fields:', JSON.stringify(model.fields));
       }
       
-      // Crear una copia de los campos para evitar problemas de referencia
+      // Create a copy of fields to avoid reference issues
       const fieldsData = model.fields ? [...model.fields] : [];
       
       const modelItem = new DjangoTreeItem(
@@ -263,7 +275,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
           : vscode.TreeItemCollapsibleState.None,
         {
           command: 'djangoStructureExplorer.openFile',
-          title: 'Abrir Modelo',
+          title: 'Open Model',
           arguments: [modelsPath, model.lineNumber]
         },
         vscode.Uri.file(modelsPath),
@@ -271,29 +283,28 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       );
       modelItem.iconPath = new vscode.ThemeIcon('symbol-class');
       
-      // Almacenar los campos del modelo en el elemento para acceder a ellos más tarde
-      modelItem.tooltip = `Modelo: ${model.name}`;
-      modelItem.description = `${fieldsData.length} campos`;
+      // Store model fields in the tree item for later access
+      modelItem.tooltip = `Model: ${model.name}`;
+      modelItem.description = `${fieldsData.length} fields`;
       
-      // No podemos modificar command directamente porque es de solo lectura
-      // En su lugar, almacenamos los campos como datos personalizados
-      
-      // También guardar en una propiedad personalizada para mayor seguridad
+      // Store fields as custom data since we can't modify command directly
       (modelItem as any).modelFields = fieldsData;
       
       return modelItem;
     });
+
+    return this.sortItems(items);
   }
 
   private async getViews(viewsPath: string): Promise<DjangoTreeItem[]> {
     const views = await this.analyzer.extractViews(viewsPath);
-    return views.map(view => {
+    const items = views.map(view => {
       const viewItem = new DjangoTreeItem(
         view.name,
         vscode.TreeItemCollapsibleState.None,
         {
           command: 'djangoStructureExplorer.openFile',
-          title: 'Abrir Vista',
+          title: 'Open View',
           arguments: [viewsPath, view.lineNumber]
         },
         vscode.Uri.file(viewsPath),
@@ -304,17 +315,19 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
         : new vscode.ThemeIcon('symbol-method');
       return viewItem;
     });
+
+    return this.sortItems(items);
   }
 
   private async getUrls(urlsPath: string): Promise<DjangoTreeItem[]> {
     const urls = await this.analyzer.extractUrls(urlsPath);
-    return urls.map(url => {
+    const items = urls.map(url => {
       const urlItem = new DjangoTreeItem(
         url.pattern,
         vscode.TreeItemCollapsibleState.None,
         {
           command: 'djangoStructureExplorer.openFile',
-          title: 'Abrir URL',
+          title: 'Open URL',
           arguments: [urlsPath, url.lineNumber]
         },
         vscode.Uri.file(urlsPath),
@@ -324,17 +337,19 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       urlItem.iconPath = new vscode.ThemeIcon('link');
       return urlItem;
     });
+
+    return this.sortItems(items);
   }
 
   private async getAdminClasses(adminPath: string): Promise<DjangoTreeItem[]> {
     const adminClasses = await this.analyzer.extractAdminClasses(adminPath);
-    return adminClasses.map(adminClass => {
+    const items = adminClasses.map(adminClass => {
       const adminItem = new DjangoTreeItem(
         adminClass.name,
         vscode.TreeItemCollapsibleState.None,
         {
           command: 'djangoStructureExplorer.openFile',
-          title: 'Abrir Clase Admin',
+          title: 'Open Admin Class',
           arguments: [adminPath, adminClass.lineNumber]
         },
         vscode.Uri.file(adminPath),
@@ -343,6 +358,8 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       adminItem.iconPath = new vscode.ThemeIcon('symbol-class');
       return adminItem;
     });
+
+    return this.sortItems(items);
   }
 
   private async getSettings(settingsDir: string): Promise<DjangoTreeItem[]> {
@@ -354,13 +371,13 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
     const settingsPath = settingsFiles[0];
     const settings = await this.analyzer.extractSettings(settingsPath);
     
-    return settings.map(setting => {
+    const items = settings.map(setting => {
       const settingItem = new DjangoTreeItem(
         setting.name,
         vscode.TreeItemCollapsibleState.None,
         {
           command: 'djangoStructureExplorer.openFile',
-          title: 'Abrir Setting',
+          title: 'Open Setting',
           arguments: [settingsPath, setting.lineNumber]
         },
         vscode.Uri.file(settingsPath),
@@ -370,18 +387,19 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       settingItem.iconPath = new vscode.ThemeIcon('symbol-constant');
       return settingItem;
     });
+
+    return this.sortItems(items);
   }
 
   private async getModelFields(modelItem: DjangoTreeItem): Promise<DjangoTreeItem[]> {
-    // Recuperar los campos del modelo almacenados en el elemento
+    // Get model fields stored in the tree item
     const fields = (modelItem as any).modelFields || [];
     const modelsPath = modelItem.resourceUri!.fsPath;
     
-    
-    // Si no hay campos, intentar obtenerlos de nuevo
+    // If no fields, try to get them again
     if (fields.length === 0) {
       try {
-        // Intentar extraer el modelo de nuevo para obtener sus campos
+        // Try to extract the model again to get its fields
         const models = await this.analyzer.extractModels(modelsPath);
         const modelName = modelItem.label?.toString() || '';
         const model = models.find(m => m.name === modelName);

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Tree structure lines -->
+  <path d="M2 2V14" stroke="currentColor" stroke-width="1.2"/>
+  <path d="M2 4H4" stroke="currentColor" stroke-width="1.2"/>
+  <path d="M4 4V6" stroke="currentColor" stroke-width="1.2"/>
+  <path d="M2 8H4" stroke="currentColor" stroke-width="1.2"/>
+  <path d="M4 8V10" stroke="currentColor" stroke-width="1.2"/>
+  <path d="M2 12H4" stroke="currentColor" stroke-width="1.2"/>
+  <path d="M4 12V14" stroke="currentColor" stroke-width="1.2"/>
+  
+  <!-- Django logo -->
+  <path d="M7 3H9V5H7V3Z" fill="currentColor"/>
+  <path d="M7 7H9V13H7V7Z" fill="currentColor"/>
+  <path d="M11 3H13V13H11V3Z" fill="currentColor"/>
+  
+  <!-- Connecting lines -->
+  <path d="M4 4H7" stroke="currentColor" stroke-width="1.2"/>
+  <path d="M4 8H7" stroke="currentColor" stroke-width="1.2"/>
+  <path d="M4 12H7" stroke="currentColor" stroke-width="1.2"/>
+</svg>
