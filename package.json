@@ -2,7 +2,7 @@
   "name": "django-structure-explorer",
   "displayName": "Django Structure Explorer",
   "description": "PyCharm-style Django project structure explorer for VSCode",
-  "version": "1.2.6",
+  "version": "1.2.7",
   "publisher": "Dos2Locos",
   "repository": {
     "type": "git",
