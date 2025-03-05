@@ -21,6 +21,7 @@
     "onView:django-explorer"
   ],
   "main": "./out/extension.js",
+  "icon": "resources/django.png",
   "contributes": {
     "configuration": {
       "title": "Django Structure Explorer",
