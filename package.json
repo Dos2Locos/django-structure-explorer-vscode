@@ -1,8 +1,8 @@
 {
   "name": "django-structure-explorer",
   "displayName": "Django Structure Explorer",
-  "description": "Explorador de estructura de proyectos Django al estilo PyCharm",
-  "version": "0.1.0",
+  "description": "PyCharm-style Django project structure explorer for VSCode",
+  "version": "1.2.7",
   "publisher": "Dos2Locos",
   "repository": {
     "type": "git",
@@ -16,27 +16,67 @@
   ],
   "activationEvents": [
     "onLanguage:python",
-    "workspaceContains:manage.py"
+    "workspaceContains:manage.py",
+    "onView:djangoStructureExplorer",
+    "onView:django-explorer"
   ],
   "main": "./out/extension.js",
+  "icon": "resources/django.png",
   "contributes": {
+    "configuration": {
+      "title": "Django Structure Explorer",
+      "properties": {
+        "djangoStructureExplorer.sortOrder": {
+          "type": "string",
+          "default": "alphabetical",
+          "enum": [
+            "alphabetical",
+            "alphabeticalDesc",
+            "codeOrder"
+          ],
+          "enumDescriptions": [
+            "Sort items alphabetically (A-Z)",
+            "Sort items alphabetically (Z-A)",
+            "Keep items in the order they appear in code"
+          ],
+          "description": "How to sort items in the tree view"
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "django-explorer",
+          "title": "Django Explorer",
+          "icon": "resources/django.svg"
+        }
+      ]
+    },
     "views": {
-      "explorer": [
+      "django-explorer": [
         {
           "id": "djangoStructureExplorer",
           "name": "Django Explorer"
         }
       ]
     },
+    "languages": [
+      {
+        "id": "python",
+        "extensions": [
+          ".py"
+        ]
+      }
+    ],
     "commands": [
       {
         "command": "djangoStructureExplorer.refresh",
-        "title": "Refrescar Explorador Django",
+        "title": "Refresh Django Explorer",
         "icon": "$(refresh)"
       },
       {
         "command": "djangoStructureExplorer.openFile",
-        "title": "Abrir Archivo"
+        "title": "Open File"
       }
     ],
     "menus": {
