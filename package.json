@@ -2,7 +2,7 @@
   "name": "django-structure-explorer",
   "displayName": "Django Structure Explorer",
   "description": "PyCharm-style Django project structure explorer for VSCode",
-  "version": "1.2.5",
+  "version": "1.2.6",
   "publisher": "Dos2Locos",
   "repository": {
     "type": "git",
@@ -28,7 +28,11 @@
         "djangoStructureExplorer.sortOrder": {
           "type": "string",
           "default": "alphabetical",
-          "enum": ["alphabetical", "alphabeticalDesc", "codeOrder"],
+          "enum": [
+            "alphabetical",
+            "alphabeticalDesc",
+            "codeOrder"
+          ],
           "enumDescriptions": [
             "Sort items alphabetically (A-Z)",
             "Sort items alphabetically (Z-A)",
@@ -58,7 +62,9 @@
     "languages": [
       {
         "id": "python",
-        "extensions": [".py"]
+        "extensions": [
+          ".py"
+        ]
       }
     ],
     "commands": [
