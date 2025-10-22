@@ -70,7 +70,7 @@ export class DjangoProjectAnalyzer {
     const dirs = await this.getDirectories(projectRoot);
     for (const dir of dirs) {
       const urlsPath = path.join(dir, 'urls.py');
-      if (fs.existsSync(urlsPath)) {
+      if (fs.existsSync(urlsPath) && fs.existsSync(path.join(dir, 'settings.py'))) {
         // Verificar si es el urls.py principal (contiene ROOT_URLCONF o urlpatterns)
         const content = await readFile(urlsPath, 'utf8');
         if (content.includes('ROOT_URLCONF') || content.includes('urlpatterns')) {
