@@ -30,6 +30,7 @@ export interface DjangoUrl {
   pattern: string;
   viewName: string;
   lineNumber: number;
+  path: string;
 }
 
 export interface DjangoAdminClass {
@@ -566,7 +567,8 @@ export class DjangoProjectAnalyzer {
           urls.push({
             pattern: pattern,
             viewName: match[2],
-            lineNumber: i
+            lineNumber: i,
+            path: urlsPath
           });
           continue;
         }
