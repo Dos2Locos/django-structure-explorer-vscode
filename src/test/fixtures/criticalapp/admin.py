@@ -1,10 +1,10 @@
 """Fixture de admin que cubre casos CRITICAL del parser.
 
 Casos cubiertos:
-- @admin.register(Model) decorador simple.
-- @admin.register(Model, OtroModel) decorador con varios modelos.
-- Clase admin con model = ... explicito.
-- admin.site.register(Model, AdminClass) registro directo.
+- Decorador de registro simple con un modelo.
+- Decorador de registro con varios modelos.
+- Clase admin con atributo de modelo explicito.
+- Registro directo en el sitio de administracion.
 """
 from django.contrib import admin
 

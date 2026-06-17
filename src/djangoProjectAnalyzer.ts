@@ -281,6 +281,21 @@ export class DjangoProjectAnalyzer {
       let parenthesesCount = 0; // Para rastrear paréntesis abiertos/cerrados
       let isPropertyMethod = false; // Para rastrear si el próximo método tiene el decorador @property
 
+      // Patrones de campo compilados UNA sola vez (no dependen de la línea).
+      // El último grupo captura el paréntesis de apertura (`\(?` dentro del grupo)
+      // para que el conteo de paréntesis cuente tanto `(` como `)`. El tipo de campo
+      // es siempre el grupo 2 tanto en patrones con prefijo como en importación directa.
+      const fieldPatterns: RegExp[] = [
+        new RegExp(`^\\s+(\\w+)\\s*=\\s*models\\.(\\w+)\\s*(\\(?.*)`)
+      ];
+      if (importAliases['models']) {
+        fieldPatterns.push(new RegExp(`^\\s+(\\w+)\\s*=\\s*${importAliases['models']}\\.(\\w+)\\s*(\\(?.*)`));
+      }
+      if (directImports.length > 0) {
+        const directImportsPattern = directImports.join('|');
+        fieldPatterns.push(new RegExp(`^\\s+(\\w+)\\s*=\\s*(${directImportsPattern})\\s*(\\(?.*)`));
+      }
+
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         const indentMatch = line.match(/^(\s*)/);
@@ -371,35 +386,12 @@ export class DjangoProjectAnalyzer {
         }
 
         // Construir expresión regular para detectar campos considerando alias e importaciones directas
-        // El último grupo captura el paréntesis de apertura (`\(?` DENTRO del grupo),
-        // de modo que el conteo de paréntesis cuente tanto el `(` como el `)`. Antes
-        // `\(?` lo consumía fuera del grupo y un campo de una sola línea quedaba en -1,
-        // tratándose como "pendiente" y perdiéndose al cambiar de clase.
-        let fieldRegexPatterns = [
-          // Patrón estándar: name = models.CharField(...)
-          `^\\s+(\\w+)\\s*=\\s*models\\.(\\w+)\\s*(\\(?.*)`
-        ];
-
-        // Añadir patrón para alias: name = m.CharField(...)
-        if (importAliases['models']) {
-          fieldRegexPatterns.push(`^\\s+(\\w+)\\s*=\\s*${importAliases['models']}\\.(\\w+)\\s*(\\(?.*)`);
-        }
-
-        // Añadir patrón para importaciones directas: name = CharField(...)
-        if (directImports.length > 0) {
-          const directImportsPattern = directImports.join('|');
-          fieldRegexPatterns.push(`^\\s+(\\w+)\\s*=\\s*(${directImportsPattern})\\s*(\\(?.*)`);
-        }
-
-        // Intentar cada patrón
-        let fieldMatch = null;
-        let matchedPattern = '';
-        for (const pattern of fieldRegexPatterns) {
-          const regex = new RegExp(pattern);
+        // Intentar cada patrón (ya compilados fuera del bucle)
+        let fieldMatch: RegExpMatchArray | null = null;
+        for (const regex of fieldPatterns) {
           const match = line.match(regex);
           if (match) {
             fieldMatch = match;
-            matchedPattern = pattern;
             break;
           }
         }
@@ -414,18 +406,9 @@ export class DjangoProjectAnalyzer {
             });
           }
 
-          // Iniciar el seguimiento de un nuevo campo
+          // Iniciar el seguimiento de un nuevo campo. El tipo es siempre el grupo 2.
           currentFieldName = fieldMatch[1];
-
-          // El tipo de campo depende del patrón que coincidió
-          if (matchedPattern.includes('(\\w+)\\.(\\w+)')) {
-            // Patrón con prefijo (models.CharField o alias.CharField)
-            currentFieldType = fieldMatch[2];
-          } else {
-            // Patrón de importación directa (CharField)
-            currentFieldType = fieldMatch[2];
-          }
-
+          currentFieldType = fieldMatch[2];
           currentFieldLine = i;
           fieldStartIndentation = indentation;
 
@@ -587,21 +570,54 @@ export class DjangoProjectAnalyzer {
       // Expresión regular para encontrar includes
       const includeRegex = /include\s*\(\s*['"]([^'"]+)['"]\s*(?:,\s*['"]([^'"]+)['"]\s*)?\)/;
 
+      // Routers DRF: router.register(r'prefix', SomeViewSet[, ...]) (caso DRF/#12).
+      const routerRegex = /\brouter\.register\s*\(\s*r?['"]([^'"]*)['"]\s*,\s*(\w+(?:\.\w+)*)/;
+      // Detecta el inicio de una llamada path()/re_path()/url() para unir continuaciones.
+      const urlCallStartRegex = /\b(?:re_path|path|url)\s*\(/;
+
       for (let i = 0; i < lines.length; i++) {
+        // Unir continuaciones cuando una llamada path()/re_path()/url() abre
+        // paréntesis sin cerrarlos en la misma línea (definiciones multilínea).
+        let logicalLine = lines[i];
+        const startLine = i;
+        if (urlCallStartRegex.test(logicalLine)) {
+          let parenDepth =
+            (logicalLine.match(/\(/g) || []).length - (logicalLine.match(/\)/g) || []).length;
+          let j = i;
+          while (parenDepth > 0 && j + 1 < lines.length) {
+            j++;
+            logicalLine += ' ' + lines[j].trim();
+            parenDepth +=
+              (lines[j].match(/\(/g) || []).length - (lines[j].match(/\)/g) || []).length;
+          }
+          i = j; // saltar las líneas ya consumidas
+        }
+
         // Buscar patrones de URL directos
-        let match = lines[i].match(pathRegex) || lines[i].match(rePathRegex) || lines[i].match(urlRegex);
+        let match = logicalLine.match(pathRegex) || logicalLine.match(rePathRegex) || logicalLine.match(urlRegex);
         if (match) {
           const pattern = prefix + match[1];
           urls.push({
             pattern: pattern,
             viewName: match[2],
-            lineNumber: i
+            lineNumber: startLine
+          });
+          continue;
+        }
+
+        // Buscar registros de routers DRF (router.register).
+        const routerMatch = logicalLine.match(routerRegex);
+        if (routerMatch) {
+          urls.push({
+            pattern: prefix + routerMatch[1],
+            viewName: routerMatch[2],
+            lineNumber: startLine
           });
           continue;
         }
 
         // Buscar includes
-        const includeMatch = lines[i].match(includeRegex);
+        const includeMatch = logicalLine.match(includeRegex);
         if (includeMatch) {
           const includedModule = includeMatch[1];
           const includePrefix = includeMatch[2] || '';
@@ -647,53 +663,69 @@ export class DjangoProjectAnalyzer {
 
     try {
       const content = await readFile(adminPath, 'utf8');
+      const lineOf = (index: number): number =>
+        content.substring(0, index).split('\n').length - 1;
 
-      // Buscar todas las clases de admin
-      const classRegex = /class\s+(\w+)\s*\(\s*(?:admin\.)?(\w+Admin|TabularInline|StackedInline)\s*\)/g;
-      let classMatch;
-      while ((classMatch = classRegex.exec(content)) !== null) {
-        const adminClass: DjangoAdminClass = {
-          name: classMatch[1],
-          lineNumber: content.substring(0, classMatch.index).split('\n').length - 1,
-          modelName: ''
-        };
+      // Clases ya asociadas a un modelo vía decorador, para no duplicarlas
+      // en el escaneo de clases.
+      const decoratedClasses = new Set<string>();
 
-        // Buscar el modelo asociado
-        const modelRegex = new RegExp(`model\\s*=\\s*(\\w+)`, 'g');
-        const modelContent = content.substring(classMatch.index, content.length);
-        const modelMatch = modelRegex.exec(modelContent);
-        if (modelMatch) {
-          adminClass.modelName = modelMatch[1];
+      // Decoradores @admin.register(A, B, ...): admite varios modelos y
+      // decoradores apilados antes de la clase (se busca la primera `class` posterior).
+      const decoratorRegex = /@admin\.register\s*\(([^)]*)\)/g;
+      let decoratorMatch: RegExpExecArray | null;
+      while ((decoratorMatch = decoratorRegex.exec(content)) !== null) {
+        const models = decoratorMatch[1]
+          .split(',')
+          .map(m => m.trim())
+          .filter(Boolean);
+        const classAfter = content.substring(decoratorMatch.index).match(/\bclass\s+(\w+)\s*\(/);
+        if (classAfter && models.length > 0) {
+          decoratedClasses.add(classAfter[1]);
+          adminClasses.push({
+            name: classAfter[1],
+            lineNumber: lineOf(decoratorMatch.index),
+            modelName: models.join(', ')
+          });
         }
-
-        adminClasses.push(adminClass);
       }
 
-      // Buscar registros directos con admin.site.register
-      const registerRegex = /admin\.site\.register\s*\(\s*(\w+)(?:\s*,\s*(\w+))?\s*\)/g;
-      let registerMatch;
-      while ((registerMatch = registerRegex.exec(content)) !== null) {
-        const modelName = registerMatch[1];
-        const adminClassName = registerMatch[2] || 'ModelAdmin';
+      // Clases de admin declaradas: ModelAdmin, inlines o herencia custom (*Admin).
+      const classRegex = /class\s+(\w+)\s*\(\s*([\w.]+)\s*\)/g;
+      let classMatch: RegExpExecArray | null;
+      while ((classMatch = classRegex.exec(content)) !== null) {
+        const className = classMatch[1];
+        const baseName = classMatch[2].split('.').pop() || classMatch[2];
+        const isAdminBase =
+          /Admin$/.test(baseName) ||
+          baseName === 'TabularInline' ||
+          baseName === 'StackedInline';
+        if (!isAdminBase || decoratedClasses.has(className)) {
+          continue;
+        }
+
+        // Buscar `model = X` SOLO dentro del cuerpo de esta clase (hasta el
+        // siguiente `class` en columna 0 o el final del archivo), no en todo el resto.
+        const restAfter = content.substring(classMatch.index + classMatch[0].length);
+        const nextClass = restAfter.search(/\nclass\s/);
+        const body = nextClass >= 0 ? restAfter.substring(0, nextClass) : restAfter;
+        const modelMatch = body.match(/\bmodel\s*=\s*(\w+)/);
 
         adminClasses.push({
-          name: adminClassName,
-          lineNumber: content.substring(0, registerMatch.index).split('\n').length - 1,
-          modelName: modelName
+          name: className,
+          lineNumber: lineOf(classMatch.index),
+          modelName: modelMatch ? modelMatch[1] : ''
         });
       }
 
-      // Buscar decoradores de register
-      const decoratorRegex = /@admin\.register\s*\(\s*(\w+)\s*\)\s*\n+\s*class\s+(\w+)/g;
-      let decoratorMatch;
-      while ((decoratorMatch = decoratorRegex.exec(content)) !== null) {
-        const modelName = decoratorMatch[1];
-        const adminClassName = decoratorMatch[2];
-
+      // Registros directos: admin.site.register(Model, AdminClass?).
+      const registerRegex = /admin\.site\.register\s*\(\s*(\w+)(?:\s*,\s*(\w+))?\s*\)/g;
+      let registerMatch: RegExpExecArray | null;
+      while ((registerMatch = registerRegex.exec(content)) !== null) {
         adminClasses.push({
-          name: adminClassName,
-          lineNumber: content.substring(0, decoratorMatch.index).split('\n').length - 1,
-          modelName: modelName
+          name: registerMatch[2] || 'ModelAdmin',
+          lineNumber: lineOf(registerMatch.index),
+          modelName: registerMatch[1]
         });
       }
 
@@ -735,25 +767,21 @@ export class DjangoProjectAnalyzer {
             value = value.substring(0, commentIndex).trim();
           }
 
-          // Manejar valores multilínea
-          if ((value.includes('{') && !value.includes('}')) ||
-              (value.includes('[') && !value.includes(']')) ||
-              (value.includes('(') && !value.includes(')'))) {
+          // Manejar valores multilínea contando el BALANCE de brackets (corchetes,
+          // llaves y paréntesis). Antes se cortaba en el primer cierre encontrado, lo
+          // que rompía estructuras anidadas como DATABASES = { "default": { ... } }.
+          const countOpen = (s: string): number => (s.match(/[[{(]/g) || []).length;
+          const countClose = (s: string): number => (s.match(/[\]})]/g) || []).length;
+          let depth = countOpen(value) - countClose(value);
 
-            // Buscar el final de la definición multilínea
+          if (depth > 0) {
             let j = i + 1;
             let multilineValue = value;
 
-            while (j < lines.length) {
+            while (j < lines.length && depth > 0) {
               const nextLine = lines[j].trim();
               multilineValue += ' ' + nextLine;
-
-              if ((value.includes('{') && nextLine.includes('}')) ||
-                  (value.includes('[') && nextLine.includes(']')) ||
-                  (value.includes('(') && nextLine.includes(')'))) {
-                break;
-              }
-
+              depth += countOpen(nextLine) - countClose(nextLine);
               j++;
             }
 
