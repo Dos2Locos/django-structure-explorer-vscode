@@ -2,12 +2,24 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { DjangoTreeItem } from './djangoTreeItem';
-import { DjangoProjectAnalyzer } from './djangoProjectAnalyzer';
+import { DjangoProjectAnalyzer, ModelField } from './djangoProjectAnalyzer';
+
+/**
+ * Comprueba de forma asíncrona si una ruta existe, sin bloquear el event loop.
+ */
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await fs.promises.access(targetPath, fs.constants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTreeItem> {
   private _onDidChangeTreeData: vscode.EventEmitter<DjangoTreeItem | undefined | null | void> = new vscode.EventEmitter<DjangoTreeItem | undefined | null | void>();
   readonly onDidChangeTreeData: vscode.Event<DjangoTreeItem | undefined | null | void> = this._onDidChangeTreeData.event;
-  
+
   private analyzer: DjangoProjectAnalyzer;
   private projectRoot: string | undefined;
 
@@ -33,10 +45,12 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
     if (!element) {
       // Root level - show main project structure
       return this.getProjectStructure();
-    } else if (element.contextValue === 'config') {
+    }
+
+    if (element.contextValue === 'config') {
       // Configuration group - show settings and main URLs
       const items: DjangoTreeItem[] = [];
-      
+
       // Add settings
       const settingsFiles = await this.analyzer.findSettingsFiles(this.projectRoot);
       if (settingsFiles.length > 0) {
@@ -74,7 +88,9 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       }
 
       return items;
-    } else if (element.contextValue === 'apps') {
+    }
+
+    if (element.contextValue === 'apps') {
       // Applications group - show all apps
       const apps = await this.analyzer.findDjangoApps(this.projectRoot);
       return Promise.all(apps.map(app => {
@@ -89,30 +105,37 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
         appItem.iconPath = new vscode.ThemeIcon('package');
         return appItem;
       }));
-    } else if (element.contextValue === 'app') {
-      // Application level - show models, views, etc.
-      return this.getAppStructure(element.resourceUri!.fsPath);
-    } else if (element.contextValue === 'models') {
-      // Show models
-      return this.getModels(element.resourceUri!.fsPath);
-    } else if (element.contextValue === 'views') {
-      // Show views
-      return this.getViews(element.resourceUri!.fsPath);
-    } else if (element.contextValue === 'urls') {
-      // Show URLs
-      return this.getUrls(element.resourceUri!.fsPath);
-    } else if (element.contextValue === 'admin') {
-      // Show admin classes
-      return this.getAdminClasses(element.resourceUri!.fsPath);
-    } else if (element.contextValue === 'main-urls') {
-      // Show global URLs
-      return this.getUrls(element.resourceUri!.fsPath);
-    } else if (element.contextValue === 'settings') {
-      // Show settings variables
-      return this.getSettings(element.resourceUri!.fsPath);
-    } else if (element.contextValue === 'model') {
+    }
+
+    // Las ramas restantes requieren un resourceUri asociado.
+    // Guardamos contra resourceUri ausente en lugar de usar aserciones non-null.
+    const uriContexts = ['app', 'models', 'views', 'urls', 'admin', 'main-urls', 'settings'];
+    if (uriContexts.includes(element.contextValue ?? '')) {
+      if (!element.resourceUri) {
+        return [];
+      }
+      const fsPath = element.resourceUri.fsPath;
+      switch (element.contextValue) {
+        case 'app':
+          return this.getAppStructure(fsPath);
+        case 'models':
+          return this.getModels(fsPath);
+        case 'views':
+          return this.getViews(fsPath);
+        case 'urls':
+        case 'main-urls':
+          return this.getUrls(fsPath);
+        case 'admin':
+          return this.getAdminClasses(fsPath);
+        case 'settings':
+          return this.getSettings(fsPath);
+      }
+    }
+
+    if (element.contextValue === 'model') {
       return this.getModelFields(element);
     }
+
     return [];
   }
 
@@ -122,6 +145,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       return undefined;
     }
 
+    // Chequeo síncrono acotado al número de raíces del workspace (habitualmente 1).
     for (const folder of workspaceFolders) {
       const managePyPath = path.join(folder.uri.fsPath, 'manage.py');
       if (fs.existsSync(managePyPath)) {
@@ -161,28 +185,29 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
     appsItem.iconPath = new vscode.ThemeIcon('layers');
     items.push(appsItem);
 
-    return this.sortItems(items);
+    // Los grupos raíz (Configuration, Applications) se devuelven en orden fijo
+    // e intencional; no se ordenan con el comparador de datos de usuario.
+    return items;
   }
 
   private sortItems(items: DjangoTreeItem[]): DjangoTreeItem[] {
     const sortOrder = vscode.workspace.getConfiguration('djangoStructureExplorer').get('sortOrder', 'alphabetical');
-    
+
     if (sortOrder === 'alphabetical') {
       return items.sort((a, b) => a.label.toString().localeCompare(b.label.toString()));
     } else if (sortOrder === 'alphabeticalDesc') {
       return items.sort((a, b) => b.label.toString().localeCompare(a.label.toString()));
     }
-    
+
     return items; // codeOrder - mantener el orden original
   }
 
   private async getAppStructure(appPath: string): Promise<DjangoTreeItem[]> {
     const items: DjangoTreeItem[] = [];
-    const appName = path.basename(appPath);
 
     // Models
     const modelsPath = path.join(appPath, 'models.py');
-    if (fs.existsSync(modelsPath)) {
+    if (await pathExists(modelsPath)) {
       const modelsItem = new DjangoTreeItem(
         'Models',
         vscode.TreeItemCollapsibleState.Collapsed,
@@ -200,7 +225,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
 
     // Views
     const viewsPath = path.join(appPath, 'views.py');
-    if (fs.existsSync(viewsPath)) {
+    if (await pathExists(viewsPath)) {
       const viewsItem = new DjangoTreeItem(
         'Views',
         vscode.TreeItemCollapsibleState.Collapsed,
@@ -218,7 +243,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
 
     // URLs
     const urlsPath = path.join(appPath, 'urls.py');
-    if (fs.existsSync(urlsPath)) {
+    if (await pathExists(urlsPath)) {
       const urlsItem = new DjangoTreeItem(
         'URLs',
         vscode.TreeItemCollapsibleState.Collapsed,
@@ -236,7 +261,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
 
     // Admin
     const adminPath = path.join(appPath, 'admin.py');
-    if (fs.existsSync(adminPath)) {
+    if (await pathExists(adminPath)) {
       const adminItem = new DjangoTreeItem(
         'Admin',
         vscode.TreeItemCollapsibleState.Collapsed,
@@ -257,21 +282,15 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
 
   private async getModels(modelsPath: string): Promise<DjangoTreeItem[]> {
     const models = await this.analyzer.extractModels(modelsPath);
-    console.log('Models found:', models.length);
-    
+
     const items = models.map(model => {
-      console.log(`Model: ${model.name}, Fields: ${model.fields?.length || 0}`);
-      if (model.fields) {
-        console.log('Model fields:', JSON.stringify(model.fields));
-      }
-      
       // Create a copy of fields to avoid reference issues
       const fieldsData = model.fields ? [...model.fields] : [];
-      
+
       const modelItem = new DjangoTreeItem(
         model.name,
-        fieldsData.length > 0 
-          ? vscode.TreeItemCollapsibleState.Collapsed 
+        fieldsData.length > 0
+          ? vscode.TreeItemCollapsibleState.Collapsed
           : vscode.TreeItemCollapsibleState.None,
         {
           command: 'djangoStructureExplorer.openFile',
@@ -282,14 +301,13 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
         'model'
       );
       modelItem.iconPath = new vscode.ThemeIcon('symbol-class');
-      
-      // Store model fields in the tree item for later access
+
       modelItem.tooltip = `Model: ${model.name}`;
       modelItem.description = `${fieldsData.length} fields`;
-      
-      // Store fields as custom data since we can't modify command directly
-      (modelItem as any).modelFields = fieldsData;
-      
+
+      // Almacenar los campos del modelo de forma tipada para acceso posterior
+      modelItem.modelFields = fieldsData;
+
       return modelItem;
     });
 
@@ -310,8 +328,8 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
         vscode.Uri.file(viewsPath),
         'view'
       );
-      viewItem.iconPath = view.isClass 
-        ? new vscode.ThemeIcon('symbol-class') 
+      viewItem.iconPath = view.isClass
+        ? new vscode.ThemeIcon('symbol-class')
         : new vscode.ThemeIcon('symbol-method');
       return viewItem;
     });
@@ -363,14 +381,18 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
   }
 
   private async getSettings(settingsDir: string): Promise<DjangoTreeItem[]> {
-    const settingsFiles = await this.analyzer.findSettingsFiles(this.projectRoot!);
+    if (!this.projectRoot) {
+      return [];
+    }
+
+    const settingsFiles = await this.analyzer.findSettingsFiles(this.projectRoot);
     if (settingsFiles.length === 0) {
       return [];
     }
-    
+
     const settingsPath = settingsFiles[0];
     const settings = await this.analyzer.extractSettings(settingsPath);
-    
+
     const items = settings.map(setting => {
       const settingItem = new DjangoTreeItem(
         setting.name,
@@ -392,28 +414,27 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
   }
 
   private async getModelFields(modelItem: DjangoTreeItem): Promise<DjangoTreeItem[]> {
-    // Get model fields stored in the tree item
-    const fields = (modelItem as any).modelFields || [];
-    const modelsPath = modelItem.resourceUri!.fsPath;
-    
-    // If no fields, try to get them again
+    if (!modelItem.resourceUri) {
+      return [];
+    }
+    const modelsPath = modelItem.resourceUri.fsPath;
+
+    // Campos almacenados de forma tipada en el item del árbol
+    let fields: ModelField[] = modelItem.modelFields ?? [];
+
+    // Si no hay campos, intentar extraerlos de nuevo (una sola vez)
     if (fields.length === 0) {
-      try {
-        // Try to extract the model again to get its fields
-        const models = await this.analyzer.extractModels(modelsPath);
-        const modelName = modelItem.label?.toString() || '';
-        const model = models.find(m => m.name === modelName);
-        
-        if (model && model.fields && model.fields.length > 0) {
-          (modelItem as any).modelFields = model.fields;
-          return this.getModelFields(modelItem);
-        }
-      } catch (error) {
-        console.error('Error al intentar obtener campos del modelo:', error);
+      const models = await this.analyzer.extractModels(modelsPath);
+      const modelName = modelItem.label?.toString() || '';
+      const model = models.find(m => m.name === modelName);
+
+      if (model && model.fields && model.fields.length > 0) {
+        modelItem.modelFields = model.fields;
+        fields = model.fields;
       }
     }
-    
-    return fields.map((field: any) => {
+
+    return fields.map((field) => {
       const fieldItem = new DjangoTreeItem(
         field.name,
         vscode.TreeItemCollapsibleState.None,
@@ -425,17 +446,16 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
         vscode.Uri.file(modelsPath),
         field.isProperty ? 'model-property' : 'model-field'
       );
-      
+
       // Usar un icono diferente para propiedades
       if (field.isProperty) {
         fieldItem.iconPath = new vscode.ThemeIcon('symbol-method');
       } else {
         fieldItem.iconPath = new vscode.ThemeIcon('symbol-field');
       }
-      
-      // Usar fieldType o type, dependiendo de cuál esté disponible
-      fieldItem.description = field.fieldType || field.type || 'Unknown';
-      fieldItem.tooltip = `${field.isProperty ? 'Propiedad' : 'Campo'}: ${field.name}\nTipo: ${field.fieldType || field.type || 'Unknown'}`;
+
+      fieldItem.description = field.fieldType || 'Unknown';
+      fieldItem.tooltip = `${field.isProperty ? 'Propiedad' : 'Campo'}: ${field.name}\nTipo: ${field.fieldType || 'Unknown'}`;
       return fieldItem;
     });
   }
