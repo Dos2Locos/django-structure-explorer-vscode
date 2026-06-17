@@ -21,11 +21,17 @@ export class DjangoOutlineProvider implements vscode.DocumentSymbolProvider {
       return [];
     }
 
+    // Respetar la cancelación antes de empezar a analizar.
+    if (token.isCancellationRequested) {
+      return [];
+    }
+
     try {
       // Analizar el archivo según su tipo
       if (fileName === 'models.py') {
         const models = await this.analyzer.extractModels(document.fileName);
         for (const model of models) {
+          if (token.isCancellationRequested) { break; }
           const modelSymbol = new vscode.DocumentSymbol(
             model.name,
             'class',
@@ -53,6 +59,7 @@ export class DjangoOutlineProvider implements vscode.DocumentSymbolProvider {
       } else if (fileName === 'views.py') {
         const views = await this.analyzer.extractViews(document.fileName);
         for (const view of views) {
+          if (token.isCancellationRequested) { break; }
           const viewSymbol = new vscode.DocumentSymbol(
             view.name,
             view.isClass ? 'class' : 'function',
@@ -65,6 +72,7 @@ export class DjangoOutlineProvider implements vscode.DocumentSymbolProvider {
       } else if (fileName === 'urls.py') {
         const urls = await this.analyzer.extractUrls(document.fileName);
         for (const url of urls) {
+          if (token.isCancellationRequested) { break; }
           const urlSymbol = new vscode.DocumentSymbol(
             url.pattern,
             url.viewName,
@@ -77,6 +85,7 @@ export class DjangoOutlineProvider implements vscode.DocumentSymbolProvider {
       } else if (fileName === 'admin.py') {
         const adminClasses = await this.analyzer.extractAdminClasses(document.fileName);
         for (const adminClass of adminClasses) {
+          if (token.isCancellationRequested) { break; }
           const adminSymbol = new vscode.DocumentSymbol(
             adminClass.name,
             `Admin for ${adminClass.modelName}`,

@@ -1,9 +1,19 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
-import * as path from 'path';
 import { DjangoStructureProvider } from './djangoStructureProvider';
-import { DjangoTreeItem } from './djangoTreeItem';
 import { DjangoOutlineProvider } from './djangoOutlineProvider';
+
+/**
+ * Comprueba de forma asíncrona si una ruta existe, sin bloquear el event loop.
+ */
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await fs.promises.access(targetPath, fs.constants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function activate(context: vscode.ExtensionContext) {
   const djangoStructureProvider = new DjangoStructureProvider();
@@ -14,7 +24,7 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.languages.registerDocumentSymbolProvider({ language: 'python', pattern: '**/*.py' }, djangoOutlineProvider),
     vscode.commands.registerCommand('djangoStructureExplorer.refresh', () => djangoStructureProvider.refresh()),
     vscode.commands.registerCommand('djangoStructureExplorer.openFile', async (filePath: string, lineNumber?: number) => {
-      if (!fs.existsSync(filePath)) {
+      if (!(await pathExists(filePath))) {
         vscode.window.showErrorMessage(`El archivo ${filePath} no existe.`);
         return;
       }
