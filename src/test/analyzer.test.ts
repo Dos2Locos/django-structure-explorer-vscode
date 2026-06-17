@@ -97,5 +97,43 @@ describe('DjangoProjectAnalyzer — red de seguridad de parsing (Fase 4)', () =>
         assert.ok(names.includes(expected), `falta el setting ${expected}`);
       }
     });
+
+    it('[Fase 3] captura el valor completo de un dict anidado (balance de brackets)', async () => {
+      const settings = await analyzer.extractSettings(path.join(FIXTURES, 'settings.py'));
+      const databases = settings.find(s => s.name === 'DATABASES');
+      assert.ok(databases, 'falta el setting DATABASES');
+      // El valor debe incluir el dict anidado completo, no truncarse en el primer '}'.
+      assert.ok(databases!.value.includes('sqlite3'), 'el valor de DATABASES se truncó antes del motor');
+      assert.ok(databases!.value.trim().endsWith('}'), 'el valor de DATABASES no cerró el dict externo');
+    });
+  });
+
+  describe('Fase 3 — refinamiento de URLs y admin', () => {
+    it('[Fase 3] captura una ruta path() declarada en varias líneas', async () => {
+      const urls = await analyzer.extractUrls(path.join(FIXTURES, 'urls.py'));
+      const views = urls.map(u => u.viewName);
+      assert.ok(views.includes('views.contact'), 'falta la ruta path() multilínea');
+    });
+
+    it('[Fase 3] captura un router.register() de DRF', async () => {
+      const urls = await analyzer.extractUrls(path.join(FIXTURES, 'urls.py'));
+      const authors = urls.find(u => u.viewName === 'views.AuthorViewSet');
+      assert.ok(authors, 'falta el registro del router DRF');
+      assert.strictEqual(authors!.pattern, 'authors');
+    });
+
+    it('[Fase 3] asocia varios modelos a un @admin.register(A, B)', async () => {
+      const admins = await analyzer.extractAdminClasses(path.join(FIXTURES, 'admin.py'));
+      const shared = admins.find(a => a.name === 'SharedAdmin');
+      assert.ok(shared, 'falta SharedAdmin');
+      assert.strictEqual(shared!.modelName, 'Category, TimeStamped');
+    });
+
+    it('[Fase 3] no duplica una clase admin ya registrada por decorador', async () => {
+      const admins = await analyzer.extractAdminClasses(path.join(FIXTURES, 'admin.py'));
+      const articleAdmins = admins.filter(a => a.name === 'ArticleAdmin');
+      assert.strictEqual(articleAdmins.length, 1, 'ArticleAdmin no debería duplicarse');
+      assert.strictEqual(articleAdmins[0].modelName, 'Article');
+    });
   });
 });
