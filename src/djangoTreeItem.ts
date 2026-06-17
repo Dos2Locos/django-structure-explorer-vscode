@@ -1,7 +1,13 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
+import { ModelField } from './djangoProjectAnalyzer';
 
 export class DjangoTreeItem extends vscode.TreeItem {
+  /**
+   * Campos del modelo asociados a este item (solo para items de tipo 'model').
+   * Tipado explícito en lugar del antiguo canal lateral `(item as any).modelFields`.
+   */
+  public modelFields?: ModelField[];
+
   constructor(
     public readonly label: string,
     public readonly collapsibleState: vscode.TreeItemCollapsibleState,
@@ -11,9 +17,6 @@ export class DjangoTreeItem extends vscode.TreeItem {
   ) {
     super(label, collapsibleState);
     this.tooltip = this.label;
-    if (resourceUri) {
-      this.resourceUri = resourceUri;
-    }
     if (contextValue) {
       this.contextValue = contextValue;
     }
