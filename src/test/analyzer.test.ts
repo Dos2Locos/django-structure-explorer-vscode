@@ -4,6 +4,7 @@ import { DjangoProjectAnalyzer } from '../djangoProjectAnalyzer';
 
 // __dirname en runtime = <root>/out/test ; los fixtures viven en src/test (no se compilan).
 const FIXTURES = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'criticalapp');
+const FIXTURES_COMMENTS = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'commentsapp');
 
 describe('DjangoProjectAnalyzer — red de seguridad de parsing (Fase 4)', () => {
   const analyzer = new DjangoProjectAnalyzer();
@@ -134,6 +135,66 @@ describe('DjangoProjectAnalyzer — red de seguridad de parsing (Fase 4)', () =>
       const articleAdmins = admins.filter(a => a.name === 'ArticleAdmin');
       assert.strictEqual(articleAdmins.length, 1, 'ArticleAdmin no debería duplicarse');
       assert.strictEqual(articleAdmins[0].modelName, 'Article');
+    });
+  });
+
+  // Debilidad del parser con comentarios: no debe detectar símbolos dentro de
+  // código comentado (# de línea ni bloques de triple comilla), pero SÍ debe
+  // conservar las '#' que aparecen dentro de cadenas legítimas.
+  describe('Comentarios — # de línea y docstrings multilínea', () => {
+    describe('extractModels', () => {
+      it('no detecta clases ni campos comentados, sí los reales', async () => {
+        const models = await analyzer.extractModels(path.join(FIXTURES_COMMENTS, 'models.py'));
+        const names = models.map(m => m.name);
+        assert.deepStrictEqual(new Set(names), new Set(['Producto']), 'solo Producto es un modelo real');
+
+        const producto = models.find(m => m.name === 'Producto');
+        const fields = (producto?.fields ?? []).map(f => f.name);
+        assert.ok(fields.includes('nombre'), 'falta el campo nombre');
+        assert.ok(fields.includes('activo'), 'falta el campo activo (con comentario al final)');
+        assert.ok(!fields.includes('descripcion'), 'no debe capturar un campo comentado');
+        assert.ok(!fields.includes('precio_antiguo'), 'no debe capturar un campo dentro del docstring');
+      });
+    });
+
+    describe('extractUrls', () => {
+      it('no detecta rutas comentadas, sí las reales', async () => {
+        const urls = await analyzer.extractUrls(path.join(FIXTURES_COMMENTS, 'urls.py'));
+        const views = urls.map(u => u.viewName);
+        assert.ok(views.includes('views.inicio'), 'falta la ruta real inicio');
+        assert.ok(views.includes('views.contacto'), 'falta la ruta real contacto');
+        assert.ok(!views.includes('views.viejo'), 'no debe capturar una ruta comentada');
+        assert.ok(!views.includes('views.extra'), 'no debe capturar una ruta comentada al final');
+      });
+    });
+
+    describe('extractAdminClasses', () => {
+      it('no detecta clases de admin comentadas, sí las reales', async () => {
+        const admins = await analyzer.extractAdminClasses(path.join(FIXTURES_COMMENTS, 'admin.py'));
+        const names = admins.map(a => a.name);
+        assert.ok(names.includes('ProductoAdmin'), 'falta ProductoAdmin real');
+        assert.ok(!names.includes('ProductoViejoAdmin'), 'no debe capturar un admin comentado');
+        assert.ok(!names.includes('ViejoAdmin'), 'no debe capturar un register() comentado');
+      });
+    });
+
+    describe('extractSettings', () => {
+      it('no detecta settings comentados ni dentro de docstrings, sí los reales', async () => {
+        const settings = await analyzer.extractSettings(path.join(FIXTURES_COMMENTS, 'settings.py'));
+        const names = settings.map(s => s.name);
+        assert.ok(names.includes('DEBUG'), 'falta DEBUG');
+        assert.ok(names.includes('ALLOWED_HOSTS'), 'falta ALLOWED_HOSTS');
+        assert.ok(names.includes('REAL_SETTING'), 'falta REAL_SETTING');
+        assert.ok(!names.includes('SECRET_KEY'), 'no debe capturar un setting comentado');
+        assert.ok(!names.includes('FAKE_SETTING'), 'no debe capturar un setting dentro de un docstring');
+      });
+
+      it("conserva una '#' dentro de una cadena (no la trata como comentario)", async () => {
+        const settings = await analyzer.extractSettings(path.join(FIXTURES_COMMENTS, 'settings.py'));
+        const color = settings.find(s => s.name === 'COLOR_FONDO');
+        assert.ok(color, 'falta el setting COLOR_FONDO');
+        assert.ok(color!.value.includes('#ffffff'), 'el valor con # dentro de la cadena no debe truncarse');
+      });
     });
   });
 });

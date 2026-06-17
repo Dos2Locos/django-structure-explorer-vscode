@@ -69,6 +69,96 @@ export interface DjangoSetting {
 export class DjangoProjectAnalyzer {
 
   /**
+   * Neutraliza los comentarios del contenido para que el análisis por regex no
+   * detecte símbolos dentro de código comentado. Reemplaza por espacios:
+   *  - comentarios de línea (`#` fuera de cadenas), hasta el fin de línea
+   *  - el INTERIOR de bloques de triple comilla (`"""` / `'''`), conservando
+   *    los delimitadores de apertura y cierre
+   *
+   * Conserva la longitud del texto y las posiciones de `\n`, de modo que los
+   * números de línea y los offsets siguen siendo válidos para todos los
+   * extractores (tanto los que iteran `split('\n')` como `extractAdminClasses`,
+   * que calcula la línea con `content.substring(0, index)`).
+   *
+   * Las cadenas normales de una sola línea se conservan intactas: son valores
+   * que el parser necesita (patrones de URL, valores de settings…); solo se
+   * evita interpretar una `#` dentro de ellas como comentario.
+   */
+  private stripComments(content: string): string {
+    const chars = content.split('');
+    const n = chars.length;
+    let inLineComment = false;
+    let single: '"' | "'" | null = null; // cadena de una línea
+    let triple: '"' | "'" | null = null; // bloque de triple comilla
+
+    const blank = (idx: number): void => {
+      if (chars[idx] !== '\n' && chars[idx] !== '\r') {
+        chars[idx] = ' ';
+      }
+    };
+
+    let i = 0;
+    while (i < n) {
+      const c = chars[i];
+
+      if (inLineComment) {
+        if (c === '\n') {
+          inLineComment = false;
+        } else {
+          blank(i);
+        }
+        i++;
+        continue;
+      }
+
+      if (triple) {
+        // ¿Cierre del bloque triple? Conservar los 3 delimitadores.
+        if (c === triple && chars[i + 1] === triple && chars[i + 2] === triple) {
+          triple = null;
+          i += 3;
+          continue;
+        }
+        blank(i);
+        i++;
+        continue;
+      }
+
+      if (single) {
+        if (c === '\\') {
+          i += 2; // saltar el carácter escapado
+          continue;
+        }
+        if (c === single || c === '\n') {
+          single = null; // fin de cadena (las cadenas de una línea no cruzan '\n')
+        }
+        i++;
+        continue;
+      }
+
+      // Fuera de cualquier cadena o comentario
+      if (c === '#') {
+        inLineComment = true;
+        blank(i);
+        i++;
+        continue;
+      }
+      if (c === '"' || c === "'") {
+        if (chars[i + 1] === c && chars[i + 2] === c) {
+          triple = c; // entrar al bloque triple, conservando el delimitador
+          i += 3;
+          continue;
+        }
+        single = c;
+        i++;
+        continue;
+      }
+      i++;
+    }
+
+    return chars.join('');
+  }
+
+  /**
    * Busca todos los archivos settings.py en el proyecto
    */
   async findSettingsFiles(projectRoot: string): Promise<string[]> {
@@ -131,7 +221,7 @@ export class DjangoProjectAnalyzer {
     const models: DjangoModel[] = [];
 
     try {
-      const content = await readFile(modelsPath, 'utf8');
+      const content = this.stripComments(await readFile(modelsPath, 'utf8'));
       const lines = content.split('\n');
 
       // Analizar las importaciones para detectar alias de models o importaciones directas
@@ -515,7 +605,7 @@ export class DjangoProjectAnalyzer {
     const views: DjangoView[] = [];
 
     try {
-      const content = await readFile(viewsPath, 'utf8');
+      const content = this.stripComments(await readFile(viewsPath, 'utf8'));
       const lines = content.split('\n');
 
       // Expresión regular para encontrar funciones de vista
@@ -557,7 +647,7 @@ export class DjangoProjectAnalyzer {
     const urls: DjangoUrl[] = [];
 
     try {
-      const content = await readFile(urlsPath, 'utf8');
+      const content = this.stripComments(await readFile(urlsPath, 'utf8'));
       const lines = content.split('\n');
 
       // Expresiones regulares para encontrar patrones de URL
@@ -662,7 +752,7 @@ export class DjangoProjectAnalyzer {
     const adminClasses: DjangoAdminClass[] = [];
 
     try {
-      const content = await readFile(adminPath, 'utf8');
+      const content = this.stripComments(await readFile(adminPath, 'utf8'));
       const lineOf = (index: number): number =>
         content.substring(0, index).split('\n').length - 1;
 
@@ -743,7 +833,9 @@ export class DjangoProjectAnalyzer {
     const settings: DjangoSetting[] = [];
 
     try {
-      const content = await readFile(settingsPath, 'utf8');
+      // stripComments neutraliza comentarios (`#` y bloques `"""`) respetando las
+      // cadenas, así que aquí ya no hace falta recortar comentarios a mano.
+      const content = this.stripComments(await readFile(settingsPath, 'utf8'));
       const lines = content.split('\n');
 
       // Expresión regular para encontrar definiciones de variables
@@ -752,20 +844,14 @@ export class DjangoProjectAnalyzer {
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
 
-        // Ignorar comentarios y líneas vacías
-        if (line.startsWith('#') || line === '') {
+        // Ignorar líneas vacías (los comentarios ya quedaron en blanco).
+        if (line === '') {
           continue;
         }
 
         const match = line.match(settingRegex);
         if (match) {
           let value = match[2].trim();
-
-          // Eliminar comentarios al final de la línea
-          const commentIndex = value.indexOf('#');
-          if (commentIndex > 0) {
-            value = value.substring(0, commentIndex).trim();
-          }
 
           // Manejar valores multilínea contando el BALANCE de brackets (corchetes,
           // llaves y paréntesis). Antes se cortaba en el primer cierre encontrado, lo

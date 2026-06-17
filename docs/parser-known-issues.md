@@ -1,6 +1,6 @@
 # Debilidades conocidas del parser
 
-> Estado: **pendiente**. Documento para retomar el trabajo más adelante.
+> Estado: **resuelto** (comentarios `#` y bloques `"""`/`'''`). Ver "Implementación" al final.
 > Última actualización: 2026-06-17.
 
 El analizador (`src/djangoProjectAnalyzer.ts`) es un parser **basado en regex línea a línea**, no un parser AST de Python. Esto lo hace rápido y sin dependencias, pero arrastra limitaciones inherentes. La más relevante detectada hasta ahora es el tratamiento de comentarios, en sus **dos formas**:
@@ -193,9 +193,35 @@ En el radar, menor prioridad:
 
 ## Resumen de seguimiento
 
-- [ ] Implementar `stripComment` por línea, consciente de cadenas (`#` fuera de comillas)
-- [ ] Implementar `stripComments` con **estado entre líneas** para bloques `"""`/`'''`, preservando el conteo de líneas
-- [ ] Distinguir bloque triple "comentario suelto" de `NOMBRE = """..."""` (valor de setting)
-- [ ] Integrar el preprocesado en TODOS los bucles de la tabla del punto 1 (incluido el tramo multilínea de `extractUrls`, recortando por línea física antes de concatenar)
-- [ ] Tests de no-captura: código comentado con `#`, dentro de docstrings y bloques triple multilínea
-- [ ] Tests de regresión: `#` dentro de cadenas, y settings con valor `"""..."""` que SÍ deben detectarse
+- [x] Implementar un preprocesado consciente de cadenas (`#` fuera de comillas)
+- [x] Estado entre líneas para bloques `"""`/`'''`, preservando longitud y conteo de líneas
+- [x] Integrar el preprocesado en TODOS los extractores (models, views, urls, admin, settings)
+- [x] Tests de no-captura: código comentado con `#`, dentro de docstrings y bloques triple multilínea
+- [x] Tests de regresión: `#` dentro de cadenas (`COLOR_FONDO = '#ffffff'`)
+
+## Implementación
+
+Resuelto con un único método `DjangoProjectAnalyzer.stripComments(content)` (en
+`src/djangoProjectAnalyzer.ts`), aplicado tras `readFile` en los cinco
+extractores. En lugar de un `stripComment` por línea + un `stripComments` con
+estado por separado, se unificó en **un escáner carácter a carácter** que:
+
+- mantiene estado entre líneas para bloques de triple comilla;
+- reemplaza por **espacios** el contenido de comentario (comentarios `#` y el
+  interior de bloques `"""`/`'''`), conservando delimitadores y `\n` →
+  **misma longitud y mismo número de líneas**, así que `lineOf` y `split('\n')`
+  siguen siendo válidos sin tocar la lógica de los extractores;
+- conserva intactas las cadenas de una sola línea (valores que el parser
+  necesita), evitando interpretar una `#` interna como comentario.
+
+Como efecto colateral se eliminó el recorte manual de comentarios de
+`extractSettings`, que truncaba el valor en la primera `#` aunque estuviera
+dentro de una cadena (caso `COLOR_FONDO = '#ffffff'`).
+
+Tests en `src/test/analyzer.test.ts` (fixture aislada
+`src/test/fixtures/commentsapp/`).
+
+### Pendiente (menor)
+
+- Continuaciones de línea con `\` (ver punto 3).
+- f-strings con expresiones `{...}` anidadas (poco probable que afecte).
