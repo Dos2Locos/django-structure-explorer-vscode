@@ -20,6 +20,15 @@ async function pathExists(targetPath: string): Promise<boolean> {
 }
 
 /**
+ * Escapa los metacaracteres de una cadena para incrustarla con seguridad dentro
+ * de un patrón RegExp. Sin esto, un import malformado (p. ej. con paréntesis)
+ * podría romper `new RegExp(...)` y dejar el parseo de campos vacío en silencio.
+ */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
  * Registra un error y lo notifica al usuario, en lugar de tragárselo en silencio.
  * Así se distingue "no hay resultados" de "el parseo falló".
  */
@@ -382,7 +391,7 @@ export class DjangoProjectAnalyzer {
         fieldPatterns.push(new RegExp(`^\\s+(\\w+)\\s*=\\s*${importAliases['models']}\\.(\\w+)\\s*(\\(?.*)`));
       }
       if (directImports.length > 0) {
-        const directImportsPattern = directImports.join('|');
+        const directImportsPattern = directImports.map(escapeRegExp).join('|');
         fieldPatterns.push(new RegExp(`^\\s+(\\w+)\\s*=\\s*(${directImportsPattern})\\s*(\\(?.*)`));
       }
 
@@ -643,8 +652,21 @@ export class DjangoProjectAnalyzer {
   /**
    * Extrae las URLs de un archivo urls.py
    */
-  async extractUrls(urlsPath: string, prefix: string = ''): Promise<DjangoUrl[]> {
+  async extractUrls(
+    urlsPath: string,
+    prefix: string = '',
+    visited: Set<string> = new Set<string>()
+  ): Promise<DjangoUrl[]> {
     const urls: DjangoUrl[] = [];
+
+    // Guardia contra includes circulares (a→b→a) y bucles de symlinks: si este
+    // urls.py ya está en la cadena de resolución, no recursar. Sin esto, un
+    // include cíclico provoca recursión infinita y tumba el host de extensiones.
+    const canonicalPath = path.resolve(urlsPath);
+    if (visited.has(canonicalPath)) {
+      return urls;
+    }
+    visited.add(canonicalPath);
 
     try {
       const content = this.stripComments(await readFile(urlsPath, 'utf8'));
@@ -721,9 +743,15 @@ export class DjangoProjectAnalyzer {
 
             // Buscar la aplicación en el proyecto
             const projectRoot = path.dirname(path.dirname(urlsPath));
-            const appPath = path.join(projectRoot, appName);
+            const appPath = path.resolve(projectRoot, appName);
 
-            if (await pathExists(appPath)) {
+            // Evitar path traversal: el nombre de app viene de include('...') en
+            // un archivo analizado, así que se exige que la ruta resuelta quede
+            // dentro del proyecto (descarta '..', rutas absolutas, etc.).
+            const withinProject =
+              appPath === projectRoot || appPath.startsWith(projectRoot + path.sep);
+
+            if (withinProject && await pathExists(appPath)) {
               includedFilePath = path.join(appPath, 'urls.py');
             }
           }
@@ -733,7 +761,7 @@ export class DjangoProjectAnalyzer {
             const newPrefix = prefix + (includePrefix ? includePrefix : '');
 
             // Extraer URLs del archivo incluido con el prefijo actualizado
-            const includedUrls = await this.extractUrls(includedFilePath, newPrefix);
+            const includedUrls = await this.extractUrls(includedFilePath, newPrefix, visited);
             urls.push(...includedUrls);
           }
         }
@@ -851,6 +879,7 @@ export class DjangoProjectAnalyzer {
 
         const match = line.match(settingRegex);
         if (match) {
+          const startLine = i; // línea donde se declara el nombre del setting
           let value = match[2].trim();
 
           // Manejar valores multilínea contando el BALANCE de brackets (corchetes,
@@ -872,12 +901,15 @@ export class DjangoProjectAnalyzer {
             }
 
             value = multilineValue;
+            // Avanzar el índice para no re-escanear las líneas de continuación
+            // ya consumidas (evita settings fantasma y trabajo duplicado).
+            i = j - 1;
           }
 
           settings.push({
             name: match[1],
             value: value,
-            lineNumber: i
+            lineNumber: startLine
           });
         }
       }
@@ -927,7 +959,8 @@ export class DjangoProjectAnalyzer {
     } catch (error) {
       // La travesía de directorios puede toparse con rutas sin permisos;
       // se registra pero no se interrumpe ni se molesta al usuario.
-      console.error(`Error al leer directorios: ${error}`);
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[DjangoStructureExplorer] Error al leer el directorio "${dir}": ${message}`);
     }
 
     return dirs;
