@@ -273,6 +273,7 @@ export class DjangoProjectAnalyzer {
       let inModelDefinition = false;
       let inMetaClass = false;
       let classIndentation = 0;
+      let metaIndentation = 0; // Indentación de la línea `class Meta:`
       let fieldStartIndentation = 0;
       let currentFieldName = '';
       let currentFieldType = '';
@@ -328,8 +329,16 @@ export class DjangoProjectAnalyzer {
         // Detectar si estamos entrando en la clase Meta
         if (line.match(metaClassRegex)) {
           inMetaClass = true;
+          metaIndentation = indentation;
           isPropertyMethod = false;
           continue;
+        }
+
+        // Salir de la clase Meta al volver a un nivel de indentación igual o menor
+        // al de `class Meta:` (p. ej. un campo declarado tras Meta, caso #11).
+        // Antes inMetaClass solo se reseteaba al cambiar de clase, perdiendo esos campos.
+        if (inMetaClass && line.trim() !== '' && indentation <= metaIndentation) {
+          inMetaClass = false;
         }
 
         // Si la indentación es menor o igual a la de la clase, hemos salido del modelo
@@ -362,20 +371,24 @@ export class DjangoProjectAnalyzer {
         }
 
         // Construir expresión regular para detectar campos considerando alias e importaciones directas
+        // El último grupo captura el paréntesis de apertura (`\(?` DENTRO del grupo),
+        // de modo que el conteo de paréntesis cuente tanto el `(` como el `)`. Antes
+        // `\(?` lo consumía fuera del grupo y un campo de una sola línea quedaba en -1,
+        // tratándose como "pendiente" y perdiéndose al cambiar de clase.
         let fieldRegexPatterns = [
           // Patrón estándar: name = models.CharField(...)
-          `^\\s+(\\w+)\\s*=\\s*models\\.(\\w+)\\s*\\(?(.*)`
+          `^\\s+(\\w+)\\s*=\\s*models\\.(\\w+)\\s*(\\(?.*)`
         ];
 
         // Añadir patrón para alias: name = m.CharField(...)
         if (importAliases['models']) {
-          fieldRegexPatterns.push(`^\\s+(\\w+)\\s*=\\s*${importAliases['models']}\\.(\\w+)\\s*\\(?(.*)`);
+          fieldRegexPatterns.push(`^\\s+(\\w+)\\s*=\\s*${importAliases['models']}\\.(\\w+)\\s*(\\(?.*)`);
         }
 
         // Añadir patrón para importaciones directas: name = CharField(...)
         if (directImports.length > 0) {
           const directImportsPattern = directImports.join('|');
-          fieldRegexPatterns.push(`^\\s+(\\w+)\\s*=\\s*(${directImportsPattern})\\s*\\(?(.*)`);
+          fieldRegexPatterns.push(`^\\s+(\\w+)\\s*=\\s*(${directImportsPattern})\\s*(\\(?.*)`);
         }
 
         // Intentar cada patrón
@@ -453,7 +466,7 @@ export class DjangoProjectAnalyzer {
         // Nueva línea con la misma indentación que el nivel de campo, pero no es continuación
         else if (indentation === fieldStartIndentation && !line.trim().startsWith('#')) {
           // Verificar si es un nuevo campo con cualquier formato no capturado anteriormente
-          const otherFieldRegex = /^\s+(\w+)\s*=\s*(\w+)(?:\.(\w+))?\s*\(?(.*)/;
+          const otherFieldRegex = /^\s+(\w+)\s*=\s*(\w+)(?:\.(\w+))?\s*(\(?.*)/;
           const otherFieldMatch = line.match(otherFieldRegex);
 
           if (otherFieldMatch) {
@@ -565,9 +578,11 @@ export class DjangoProjectAnalyzer {
       const lines = content.split('\n');
 
       // Expresiones regulares para encontrar patrones de URL
-      const pathRegex = /path\s*\(\s*['"]([^'"]+)['"]\s*,\s*(\w+(?:\.\w+)*)/;
-      const rePathRegex = /re_path\s*\(\s*['"]([^'"]+)['"]\s*,\s*(\w+(?:\.\w+)*)/;
-      const urlRegex = /url\s*\(\s*['"]([^'"]+)['"]\s*,\s*(\w+(?:\.\w+)*)/;
+      // `r?` admite raw strings (r'...'/r"...") en re_path()/url() (caso #9).
+      // `[^'"]*` admite el patron vacio de la raiz del sitio: path('').
+      const pathRegex = /path\s*\(\s*r?['"]([^'"]*)['"]\s*,\s*(\w+(?:\.\w+)*)/;
+      const rePathRegex = /re_path\s*\(\s*r?['"]([^'"]*)['"]\s*,\s*(\w+(?:\.\w+)*)/;
+      const urlRegex = /url\s*\(\s*r?['"]([^'"]*)['"]\s*,\s*(\w+(?:\.\w+)*)/;
 
       // Expresión regular para encontrar includes
       const includeRegex = /include\s*\(\s*['"]([^'"]+)['"]\s*(?:,\s*['"]([^'"]+)['"]\s*)?\)/;
