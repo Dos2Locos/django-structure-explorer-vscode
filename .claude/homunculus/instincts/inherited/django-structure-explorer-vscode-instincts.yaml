@@ -1,0 +1,398 @@
+# Instincts generated from https://github.com/Dos2Locos/django-structure-explorer-vscode
+# Generated: 2026-06-17T11:00:45.370Z
+# Version: 2.0
+# NOTE: This file supplements (does not replace) any existing curated instincts.
+# High-confidence manually curated instincts should be preserved alongside these.
+
+---
+id: django-structure-explorer-vscode-commit-conventional
+trigger: "when writing a commit message"
+confidence: 0.85
+domain: git
+source: repo-analysis
+source_repo: https://github.com/Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Commit Conventional
+
+## Action
+
+Use conventional commit format with prefixes: fix, test, feat
+
+## Evidence
+
+- 3 commits analyzed
+- Detected conventional commit pattern
+- Examples: fix: robustez del análisis (I/O async, errores propagados, tipos), test: red de seguridad de parsing + cobertura regex CRITICAL
+
+---
+id: django-structure-explorer-vscode-commit-length
+trigger: "when writing a commit message"
+confidence: 0.6
+domain: git
+source: repo-analysis
+source_repo: https://github.com/Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Commit Length
+
+## Action
+
+Write moderate-length commit messages (~67 characters)
+
+## Evidence
+
+- Average commit message length: 67 chars
+- Based on 3 commits
+
+---
+id: django-structure-explorer-vscode-naming-files
+trigger: "when creating a new file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Naming Files
+
+## Action
+
+Use camelCase naming convention
+
+## Evidence
+
+- Analyzed file naming patterns in repository
+- Dominant pattern: camelCase
+
+---
+id: django-structure-explorer-vscode-import-relative
+trigger: "when importing modules"
+confidence: 0.75
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Import Relative
+
+## Action
+
+Use relative imports for project files
+
+## Evidence
+
+- Import analysis shows relative import pattern
+- Example: import { x } from '../lib/x'
+
+---
+id: django-structure-explorer-vscode-export-style
+trigger: "when exporting from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Export Style
+
+## Action
+
+Prefer named exports
+
+## Evidence
+
+- Export pattern analysis
+- Dominant style: named
+
+---
+id: django-structure-explorer-vscode-test-colocate
+trigger: "when writing tests"
+confidence: 0.85
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Test Colocate
+
+## Action
+
+Place test file next to the source file (e.g., Button.test.tsx next to Button.tsx)
+
+## Evidence
+
+- Colocated test pattern detected
+- Tests live alongside source files
+
+---
+id: django-structure-explorer-vscode-test-framework
+trigger: "when writing tests"
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Test Framework
+
+## Action
+
+Use mocha as the test framework
+
+## Evidence
+
+- Test framework detected: mocha
+- File pattern: *.test.ts
+
+---
+id: django-structure-explorer-vscode-test-naming
+trigger: "when creating a test file"
+confidence: 0.85
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Test Naming
+
+## Action
+
+Name test files using the pattern: *.test.ts
+
+## Evidence
+
+- File pattern: *.test.ts
+- Consistent across test files
+
+---
+id: django-structure-explorer-vscode-test-types
+trigger: "when planning tests for a feature"
+confidence: 0.7
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Test Types
+
+## Action
+
+Write unit, integration tests to match project standards
+
+## Evidence
+
+- Test types detected: unit, integration
+- Coverage config: no
+
+---
+id: django-structure-explorer-vscode-workflow-parser-enhancement-and-test-extension
+trigger: "when doing parser enhancement and test extension"
+confidence: 0.6
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Workflow Parser Enhancement And Test Extension
+
+## Action
+
+Follow the parser-enhancement-and-test-extension workflow:
+1. Modify src/djangoProjectAnalyzer.ts to implement parsing improvements or bugfixes.
+2. Update or add test cases in src/test/analyzer.test.ts to cover new parsing logic.
+3. Add or modify fixture files in src/test/fixtures/criticalapp/ (e.g., admin.py, models.py, urls.py, settings.py) to provide real Django code samples for testing.
+4. Run tests to ensure all cases pass.
+5. Optionally, update test setup or configuration files (e.g., src/test/setup.ts, .mocharc.json) if test harness changes are needed.
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~2x per month
+- Files: src/djangoProjectAnalyzer.ts, src/test/analyzer.test.ts, src/test/fixtures/criticalapp/admin.py
+
+---
+id: django-structure-explorer-vscode-workflow-core-extension-robustness-refactor
+trigger: "when doing core extension robustness refactor"
+confidence: 0.6
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Workflow Core Extension Robustness Refactor
+
+## Action
+
+Follow the core-extension-robustness-refactor workflow:
+1. Refactor core files (e.g., src/djangoProjectAnalyzer.ts, src/djangoStructureProvider.ts, src/djangoTreeItem.ts, src/extension.ts) to improve async handling, error propagation, and type safety.
+2. Remove unused variables, debug logs, and fix lint warnings.
+3. Replace synchronous I/O with async equivalents and add error notifications.
+4. Test the extension to ensure stability and correctness.
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~2x per month
+- Files: src/djangoProjectAnalyzer.ts, src/djangoStructureProvider.ts, src/djangoTreeItem.ts
+
+---
+id: django-structure-explorer-vscode-instinct-naming-conventions
+trigger: "When creating or renaming files, functions, classes, or constants in TypeScript source code"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Instinct Naming Conventions
+
+## Action
+
+Use camelCase for files and functions, PascalCase for classes, and SCREAMING_SNAKE_CASE for constants
+
+## Evidence
+
+- Pattern in codeStyle.namingConventions
+- Consistent usage in src/ files
+
+---
+id: django-structure-explorer-vscode-instinct-import-export-style
+trigger: "When importing or exporting modules in TypeScript files"
+confidence: 0.85
+domain: code-style
+source: repo-analysis
+source_repo: Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Instinct Import Export Style
+
+## Action
+
+Use relative import paths and named exports
+
+## Evidence
+
+- Pattern in codeStyle.importStyle and codeStyle.exportStyle
+- Examples in src/djangoProjectAnalyzer.ts
+
+---
+id: django-structure-explorer-vscode-instinct-test-file-pattern
+trigger: "When adding new test files"
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Instinct Test File Pattern
+
+## Action
+
+Name test files with the pattern *.test.ts and colocate them with source or in a test folder
+
+## Evidence
+
+- Pattern in testing.filePattern
+- Files like src/test/analyzer.test.ts
+
+---
+id: django-structure-explorer-vscode-instinct-test-types
+trigger: "When writing tests for new or changed code"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Instinct Test Types
+
+## Action
+
+Write both unit and integration tests using the Mocha framework
+
+## Evidence
+
+- Pattern in testing.testTypes and testing.framework
+- Examples in src/test/analyzer.test.ts
+
+---
+id: django-structure-explorer-vscode-instinct-test-fixtures
+trigger: "When testing Django parsing logic"
+confidence: 0.85
+domain: testing
+source: repo-analysis
+source_repo: Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Instinct Test Fixtures
+
+## Action
+
+Add or update Python fixture files in src/test/fixtures/criticalapp/ to provide realistic Django code for tests
+
+## Evidence
+
+- Pattern in workflows[0].steps and filesInvolved
+- Files like src/test/fixtures/criticalapp/admin.py
+
+---
+id: django-structure-explorer-vscode-instinct-git-commit-format
+trigger: "When writing a commit message"
+confidence: 0.9
+domain: git
+source: repo-analysis
+source_repo: Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Instinct Git Commit Format
+
+## Action
+
+Use conventional commits with prefixes fix:, feat:, or test: followed by a concise description (average 67 characters)
+
+## Evidence
+
+- Pattern in commits.prefixes and commits.examples
+- Examples: 'fix: robustez del análisis (I/O async, errores propagados, tipos)'
+
+---
+id: django-structure-explorer-vscode-instinct-parser-enhancement-workflow
+trigger: "When improving or fixing Django parsing logic and ensuring correctness with tests"
+confidence: 0.95
+domain: workflow
+source: repo-analysis
+source_repo: Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Instinct Parser Enhancement Workflow
+
+## Action
+
+Modify src/djangoProjectAnalyzer.ts, update/add tests in src/test/analyzer.test.ts, update fixtures in src/test/fixtures/criticalapp/, and run tests
+
+## Evidence
+
+- Workflow: parser-enhancement-and-test-extension
+- Commit sequences and files involved in workflow definition
+
+---
+id: django-structure-explorer-vscode-instinct-core-robustness-refactor-workflow
+trigger: "When improving code hygiene, performance, or reliability of the extension's core logic"
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Instinct Core Robustness Refactor Workflow
+
+## Action
+
+Refactor src/djangoProjectAnalyzer.ts, src/djangoStructureProvider.ts, src/djangoTreeItem.ts, and src/extension.ts for async handling, error propagation, type safety, and remove unused code
+
+## Evidence
+
+- Workflow: core-extension-robustness-refactor
+- Commit sequences and files involved in workflow definition
+
