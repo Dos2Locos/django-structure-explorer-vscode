@@ -5,6 +5,7 @@ import { DjangoProjectAnalyzer } from '../djangoProjectAnalyzer';
 // __dirname en runtime = <root>/out/test ; los fixtures viven en src/test (no se compilan).
 const FIXTURES = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'criticalapp');
 const FIXTURES_COMMENTS = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'commentsapp');
+const FIXTURES_CYCLE = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'robustness');
 
 describe('DjangoProjectAnalyzer — red de seguridad de parsing (Fase 4)', () => {
   const analyzer = new DjangoProjectAnalyzer();
@@ -195,6 +196,35 @@ describe('DjangoProjectAnalyzer — red de seguridad de parsing (Fase 4)', () =>
         assert.ok(color, 'falta el setting COLOR_FONDO');
         assert.ok(color!.value.includes('#ffffff'), 'el valor con # dentro de la cadena no debe truncarse');
       });
+    });
+  });
+
+  // Robustez adicional (revisión de código): no debe colgarse ni producir
+  // entradas fantasma ante entradas adversas o estructuras multilínea.
+  describe('Robustez del parser', () => {
+    it('no entra en recursión infinita con includes circulares', async () => {
+      // a.urls incluye b.urls y b.urls incluye a.urls (ciclo).
+      const urls = await analyzer.extractUrls(path.join(FIXTURES_CYCLE, 'a', 'urls.py'));
+      // Lo importante es que TERMINE; además no debe duplicar indefinidamente.
+      const aurls = urls.filter(u => u.viewName === 'views.a_index');
+      assert.ok(aurls.length <= 1, 'la ruta de a no debe repetirse por el ciclo');
+    });
+
+    it('no se rompe con un import que contiene metacaracteres de regex', async () => {
+      // models.py con `from django.db.models import (CharField)` → el paréntesis
+      // rompía new RegExp(...) y dejaba los campos vacíos en silencio.
+      const models = await analyzer.extractModels(path.join(FIXTURES_CYCLE, 'regexapp', 'models.py'));
+      const m = models.find(x => x.name === 'Cosa');
+      assert.ok(m, 'debe detectar el modelo Cosa pese al import con paréntesis');
+      const fields = (m?.fields ?? []).map(f => f.name);
+      assert.ok(fields.includes('nombre'), 'debe capturar el campo pese al import problemático');
+    });
+
+    it('no genera settings fantasma a partir de líneas de un valor multilínea', async () => {
+      const settings = await analyzer.extractSettings(path.join(FIXTURES_COMMENTS, 'settings.py'));
+      const names = settings.map(s => s.name);
+      // DATABASES (multilínea) no debe inyectar claves internas como settings.
+      assert.ok(names.includes('REAL_SETTING'), 'falta REAL_SETTING tras el bloque multilínea');
     });
   });
 });

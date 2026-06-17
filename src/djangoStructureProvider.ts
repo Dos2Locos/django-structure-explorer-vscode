@@ -38,8 +38,24 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
   }
 
   async getChildren(element?: DjangoTreeItem): Promise<DjangoTreeItem[]> {
-    if (!this.projectRoot) {
-      return Promise.resolve([]);
+    try {
+      return await this.getChildrenInternal(element);
+    } catch (error) {
+      // Red de seguridad: cualquier fallo inesperado deja el árbol vacío pero
+      // avisa al usuario, en vez de romper el TreeDataProvider en silencio.
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[DjangoStructureExplorer] Error en getChildren: ${message}`);
+      vscode.window.showErrorMessage(`Django Structure Explorer: error inesperado. ${message}`);
+      return [];
+    }
+  }
+
+  private async getChildrenInternal(element?: DjangoTreeItem): Promise<DjangoTreeItem[]> {
+    // Capturar projectRoot en local: refresh() puede reasignarlo a mitad de una
+    // llamada async, así que se usa una referencia estable durante todo el método.
+    const projectRoot = this.projectRoot;
+    if (!projectRoot) {
+      return [];
     }
 
     if (!element) {
@@ -52,7 +68,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       const items: DjangoTreeItem[] = [];
 
       // Add settings
-      const settingsFiles = await this.analyzer.findSettingsFiles(this.projectRoot);
+      const settingsFiles = await this.analyzer.findSettingsFiles(projectRoot);
       if (settingsFiles.length > 0) {
         const settingsItem = new DjangoTreeItem(
           'Settings',
@@ -70,7 +86,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       }
 
       // Add main urls.py
-      const mainUrlsFile = await this.analyzer.findMainUrlsFile(this.projectRoot);
+      const mainUrlsFile = await this.analyzer.findMainUrlsFile(projectRoot);
       if (mainUrlsFile) {
         const urlsItem = new DjangoTreeItem(
           'URLs',
@@ -92,7 +108,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
 
     if (element.contextValue === 'apps') {
       // Applications group - show all apps
-      const apps = await this.analyzer.findDjangoApps(this.projectRoot);
+      const apps = await this.analyzer.findDjangoApps(projectRoot);
       return Promise.all(apps.map(app => {
         const appName = path.basename(app);
         const appItem = new DjangoTreeItem(
