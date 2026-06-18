@@ -71,21 +71,42 @@ Con tests en `src/test/analyzer.test.ts` (fixtures `robustness/`) salvo los defe
 - **`extractUrls` consume hasta EOF si una llamada multilínea no cierra paréntesis**
   (defensivo; documentado).
 
-## Features (no son defectos)
+## Features de Django 6 (implementadas)
 
-Compatibilidad con superficies nuevas de Django, no fallos del parser actual.
+- **✅ Framework de Tasks de Django 6.** `extractTasks(tasksPath)` detecta funciones
+  decoradas con `@task` / `@task(...)` en `tasks.py`. Exige el import
+  `from django.tasks import task[ as alias]` para identificar el decorador, de modo
+  que NO confunde `@shared_task` / `@app.task` de Celery con tareas de Django. El
+  provider añade un nodo "Tasks" por app cuando existe `tasks.py`.
+- **✅ Template partials de Django 6** (`{% partialdef nombre %}`).
+  `extractPartials(templatePath)` + `findAppPartials(appPath)` recorren las
+  plantillas `.html` de la app y listan las definiciones de partial, incluida la
+  variante `inline`. Ignoran los `partialdef` dentro de comentarios `{# ... #}` y
+  no confunden el uso `{% partial %}` con la definición. El provider añade un nodo
+  "Partials" por app cuando hay al menos uno.
 
-- **Soporte para el framework de Tasks de Django 6.** Django 6.0 introduce un
-  framework de tareas en segundo plano (`tasks.py`, decoradores `@task`). La
-  extensión no tiene ningún nodo para tareas. Sería un nuevo tipo de nodo en el
-  árbol (analizar `tasks.py` por app, detectar funciones decoradas con `@task`),
-  análogo a `extractViews`. El resto del parser ya es agnóstico de versión y
-  funciona con Django 6 sin cambios: modelos, vistas, URLs, admin y settings usan
-  sintaxis no modificada, y los settings nuevos (p. ej. CSP) se capturan por la
-  regla genérica `NOMBRE = valor`. `CompositePrimaryKey` también se detecta ya por
-  el patrón `models.\w+`.
-- **(Opcional) Template partials de Django 6** (`{% partialdef %}` / `{% partial %}`):
-  requeriría analizar plantillas, superficie que la extensión nunca ha cubierto.
+El resto del parser ya era agnóstico de versión: modelos, vistas, URLs, admin y
+settings usan sintaxis no modificada en Django 6, los settings nuevos (p. ej. CSP)
+se capturan por la regla genérica `NOMBRE = valor`, y `CompositePrimaryKey` se
+detecta por el patrón `models.\w+`.
+
+## DRF y django-ninja (implementado)
+
+- **✅ Serializers de DRF.** `extractSerializers(serializers.py)` detecta clases
+  cuya base termina en `Serializer` y asocia el modelo de `class Meta: model = X`.
+  Nodo "Serializers" por app.
+- **✅ Schemas de django-ninja.** `extractSchemas(schemas.py)` detecta clases cuya
+  base termina en `Schema` (`Schema`/`ModelSchema`). Nodo "Schemas" por app.
+- **✅ Endpoints REST.** Nodo "API" por app que agrega:
+  - django-ninja: `extractNinjaEndpoints(api.py)` → `@api/@router.<get|post|put|patch|delete>("ruta")`, mostrando método + ruta.
+  - DRF: `extractDrfEndpoints(views.py/viewsets.py)` → `@api_view([...])` y acciones extra `@action(...)` (con `methods`/`url_path`). Los `router.register()` ya aparecen en el nodo URLs.
+- **✅ Marcado de ViewSets/APIView.** `extractViews` clasifica las clases cuyo base
+  termina en `ViewSet` o `APIView` (incluye generics tipo `ListAPIView`); el provider
+  las muestra con descripción "DRF ViewSet"/"DRF APIView" e icono distinto.
+
+Limitaciones conocidas (LOW): un `@action(...)` repartido en varias líneas solo
+lee `methods`/`url_path` de la primera línea; los schemas/serializers definidos en
+ficheros no convencionales (no `schemas.py`/`serializers.py`) no se listan.
 
 ## Pendiente del parser (ver doc dedicado)
 
