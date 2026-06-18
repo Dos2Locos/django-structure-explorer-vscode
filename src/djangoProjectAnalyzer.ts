@@ -57,6 +57,8 @@ export interface DjangoView {
   isClass: boolean;
   /** Marca las vistas de DRF: ViewSet (router) o APIView/generics. */
   apiKind?: 'viewset' | 'apiview';
+  /** Decoradores de nivel superior aplicados a la vista (sin `@`, sin args). */
+  decorators?: string[];
 }
 
 export interface DjangoUrl {
@@ -691,15 +693,28 @@ export class DjangoProjectAnalyzer {
       const functionViewRegex = /^def\s+(\w+)\s*\(/;
       // Clase de vista, capturando las clases base para distinguir DRF.
       const classViewRegex = /^class\s+(\w+)\s*\(([^)]*)\)?/;
+      // Decorador de nivel superior (sin indentar): captura el nombre tras `@`,
+      // descartando el módulo y los argumentos (p. ej. @auth.login_required(...)).
+      const decoratorRegex = /^@([\w.]+)/;
+      // Decoradores acumulados a la espera de la def/class que decoran.
+      let pendingDecorators: string[] = [];
 
       for (let i = 0; i < lines.length; i++) {
+        const decoratorMatch = lines[i].match(decoratorRegex);
+        if (decoratorMatch) {
+          pendingDecorators.push(decoratorMatch[1].split('.').pop() as string);
+          continue;
+        }
+
         const functionMatch = lines[i].match(functionViewRegex);
         if (functionMatch) {
           views.push({
             name: functionMatch[1],
             lineNumber: i,
-            isClass: false
+            isClass: false,
+            decorators: pendingDecorators.length ? pendingDecorators : undefined
           });
+          pendingDecorators = [];
           continue;
         }
 
@@ -721,8 +736,17 @@ export class DjangoProjectAnalyzer {
             name: classMatch[1],
             lineNumber: i,
             isClass: true,
-            apiKind
+            apiKind,
+            decorators: pendingDecorators.length ? pendingDecorators : undefined
           });
+          pendingDecorators = [];
+          continue;
+        }
+
+        // Cualquier otra línea no vacía rompe la cadena de decoradores
+        // pendientes (evita arrastrarlos hasta una def/class posterior).
+        if (lines[i].trim() !== '') {
+          pendingDecorators = [];
         }
       }
     } catch (error) {
