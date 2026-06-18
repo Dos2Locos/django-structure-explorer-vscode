@@ -22,6 +22,11 @@ A Visual Studio Code extension that provides a PyCharm-like Django project struc
 - **Signals**: Lists `@receiver` handlers and custom `Signal()` declarations from `signals.py`
 - **Management Commands**: Lists custom `manage.py` commands from `management/commands/`
 - **Celery Tasks**: Detects `@shared_task` / `@app.task` in `tasks.py` (separate from Django 6 Tasks)
+- **Templates**: Per-app node listing the app's `.html` templates
+- **Go to Definition**: F12 / Ctrl+click navigation across the project:
+  - URL names — `reverse('app:detail')` and `{% url 'app:detail' %}` → `urls.py`
+  - Templates — `render()`, `template_name`, `{% extends %}` / `{% include %}` → the `.html` file
+  - Model relations — `ForeignKey` / `OneToOneField` / `ManyToManyField` target → the model class
 
 ## Why Use Django Structure Explorer?
 

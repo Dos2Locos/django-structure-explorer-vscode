@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import { DjangoStructureProvider } from './djangoStructureProvider';
 import { DjangoOutlineProvider } from './djangoOutlineProvider';
+import { DjangoDefinitionProvider } from './djangoDefinitionProvider';
 
 /**
  * Comprueba de forma asíncrona si una ruta existe, sin bloquear el event loop.
@@ -18,10 +19,21 @@ async function pathExists(targetPath: string): Promise<boolean> {
 export function activate(context: vscode.ExtensionContext) {
   const djangoStructureProvider = new DjangoStructureProvider();
   const djangoOutlineProvider = new DjangoOutlineProvider();
+  const djangoDefinitionProvider = new DjangoDefinitionProvider();
 
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider('djangoStructureExplorer', djangoStructureProvider),
     vscode.languages.registerDocumentSymbolProvider({ language: 'python', pattern: '**/*.py' }, djangoOutlineProvider),
+    // Navegación cruzada (F12 / Ctrl+clic): URL names, plantillas y relaciones de modelo.
+    vscode.languages.registerDefinitionProvider({ language: 'python', pattern: '**/*.py' }, djangoDefinitionProvider),
+    vscode.languages.registerDefinitionProvider(
+      [
+        { language: 'html', pattern: '**/templates/**/*.html' },
+        { language: 'django-html' },
+        { pattern: '**/templates/**/*.html' }
+      ],
+      djangoDefinitionProvider
+    ),
     vscode.commands.registerCommand('djangoStructureExplorer.refresh', () => djangoStructureProvider.refresh()),
     vscode.commands.registerCommand('djangoStructureExplorer.openFile', async (filePath: string, lineNumber?: number) => {
       if (!(await pathExists(filePath))) {

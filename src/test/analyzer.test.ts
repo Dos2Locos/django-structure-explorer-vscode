@@ -9,6 +9,7 @@ const FIXTURES_CYCLE = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtu
 const FIXTURES_DJ6 = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'django6app');
 const FIXTURES_CELERY = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'celeryapp');
 const FIXTURES_REST = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'restapp');
+const FIXTURES_NAV = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'navproj');
 
 describe('DjangoProjectAnalyzer — red de seguridad de parsing (Fase 4)', () => {
   const analyzer = new DjangoProjectAnalyzer();
@@ -374,6 +375,43 @@ describe('DjangoProjectAnalyzer — red de seguridad de parsing (Fase 4)', () =>
       // Y a la inversa: las tareas de Django no deben colarse como Celery.
       const djangoAsCelery = await analyzer.extractCeleryTasks(path.join(FIXTURES_DJ6, 'tasks.py'));
       assert.strictEqual(djangoAsCelery.length, 0, '@task de django.tasks no es una tarea de Celery');
+    });
+  });
+
+  // Navegación cruzada (helpers puros que respaldan el DefinitionProvider).
+  describe('Navegación cruzada', () => {
+    it('findUrlName resuelve un nombre de URL (con y sin namespace)', async () => {
+      const conNs = await analyzer.findUrlName(FIXTURES_NAV, 'blog:author-detail');
+      assert.ok(conNs, 'debe resolver el nombre con namespace');
+      assert.ok(conNs!.filePath.endsWith(path.join('blog', 'urls.py')), 'debe apuntar a blog/urls.py');
+      const sinNs = await analyzer.findUrlName(FIXTURES_NAV, 'author-detail');
+      assert.ok(sinNs, 'debe resolver el nombre sin namespace');
+      assert.deepStrictEqual(sinNs, conNs, 'el namespace no cambia la definición localizada');
+    });
+
+    it('findUrlName devuelve undefined si el nombre no existe', async () => {
+      const loc = await analyzer.findUrlName(FIXTURES_NAV, 'no-existe');
+      assert.strictEqual(loc, undefined);
+    });
+
+    it('findTemplateFile resuelve una ruta de plantilla relativa', async () => {
+      const file = await analyzer.findTemplateFile(FIXTURES_NAV, 'blog/detail.html');
+      assert.ok(file, 'debe encontrar la plantilla');
+      assert.ok(file!.replace(/\\/g, '/').endsWith('blog/templates/blog/detail.html'));
+    });
+
+    it('findModelClass resuelve un modelo por nombre y por app.Model', async () => {
+      const porNombre = await analyzer.findModelClass(FIXTURES_NAV, 'Author');
+      assert.ok(porNombre, 'debe encontrar la clase Author');
+      assert.ok(porNombre!.filePath.endsWith(path.join('blog', 'models.py')));
+      const porApp = await analyzer.findModelClass(FIXTURES_NAV, 'blog.Author');
+      assert.deepStrictEqual(porApp, porNombre, 'app.Model debe resolver igual que Model');
+    });
+
+    it('findAppTemplates lista las plantillas de la app', async () => {
+      const templates = await analyzer.findAppTemplates(path.join(FIXTURES_NAV, 'blog'));
+      const names = templates.map(t => path.basename(t)).sort();
+      assert.deepStrictEqual(names, ['base.html', 'detail.html']);
     });
   });
 });

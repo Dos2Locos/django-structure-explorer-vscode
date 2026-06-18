@@ -125,7 +125,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
 
     // Las ramas restantes requieren un resourceUri asociado.
     // Guardamos contra resourceUri ausente en lugar de usar aserciones non-null.
-    const uriContexts = ['app', 'models', 'views', 'urls', 'admin', 'main-urls', 'settings', 'tasks', 'partials', 'serializers', 'schemas', 'api', 'forms', 'signals', 'commands', 'celery-tasks'];
+    const uriContexts = ['app', 'models', 'views', 'urls', 'admin', 'main-urls', 'settings', 'tasks', 'partials', 'templates', 'serializers', 'schemas', 'api', 'forms', 'signals', 'commands', 'celery-tasks'];
     if (uriContexts.includes(element.contextValue ?? '')) {
       if (!element.resourceUri) {
         return [];
@@ -149,6 +149,8 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
           return this.getTasks(fsPath);
         case 'partials':
           return this.getPartials(element);
+        case 'templates':
+          return this.getTemplates(fsPath);
         case 'serializers':
           return this.getSerializers(fsPath);
         case 'schemas':
@@ -343,6 +345,20 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       partialsItem.iconPath = new vscode.ThemeIcon('symbol-snippet');
       partialsItem.partials = partials;
       items.push(partialsItem);
+    }
+
+    // Templates (.html de la app)
+    const templateFiles = await this.analyzer.findAppTemplates(appPath);
+    if (templateFiles.length > 0) {
+      const templatesItem = new DjangoTreeItem(
+        'Templates',
+        vscode.TreeItemCollapsibleState.Collapsed,
+        undefined,
+        vscode.Uri.file(appPath),
+        'templates'
+      );
+      templatesItem.iconPath = new vscode.ThemeIcon('file-directory');
+      items.push(templatesItem);
     }
 
     // Serializers de DRF (serializers.py)
@@ -543,6 +559,33 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
         viewItem.iconPath = new vscode.ThemeIcon('symbol-interface');
       }
       return viewItem;
+    });
+
+    return this.sortItems(items);
+  }
+
+  private async getTemplates(appPath: string): Promise<DjangoTreeItem[]> {
+    const files = await this.analyzer.findAppTemplates(appPath);
+    const items = files.map(file => {
+      // Etiqueta relativa al directorio templates/ cuando es posible.
+      const norm = file.replace(/\\/g, '/');
+      const marker = '/templates/';
+      const idx = norm.lastIndexOf(marker);
+      const label = idx >= 0 ? norm.substring(idx + marker.length) : path.basename(file);
+
+      const item = new DjangoTreeItem(
+        label,
+        vscode.TreeItemCollapsibleState.None,
+        {
+          command: 'djangoStructureExplorer.openFile',
+          title: 'Open Template',
+          arguments: [file]
+        },
+        vscode.Uri.file(file),
+        'template'
+      );
+      item.iconPath = new vscode.ThemeIcon('file-code');
+      return item;
     });
 
     return this.sortItems(items);
