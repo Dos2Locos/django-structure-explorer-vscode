@@ -27,6 +27,9 @@ A Visual Studio Code extension that provides a PyCharm-like Django project struc
   - URL names — `reverse('app:detail')` and `{% url 'app:detail' %}` → `urls.py`
   - Templates — `render()`, `template_name`, `{% extends %}` / `{% include %}` → the `.html` file
   - Model relations — `ForeignKey` / `OneToOneField` / `ManyToManyField` target → the model class
+- **manage.py Runner**: Run common commands (`runserver`, `makemigrations`, `migrate`, `shell`, `test`, …) from the view toolbar, or run a custom management command directly from its node in the tree. The interpreter is configurable via `djangoStructureExplorer.pythonPath`
+- **View Decorators**: Function/class-based views show their top-level decorators (e.g. `@login_required`, `@permission_required`); access-controlled views are flagged with a lock icon
+- **Filter**: Filter the tree's leaf items by name from the view toolbar (clear it with the dedicated button)
 
 ## Why Use Django Structure Explorer?
 
@@ -90,7 +93,10 @@ Examine your URL patterns with details about:
 
 ## Extension Settings
 
-This extension works out of the box with no additional configuration required.
+This extension works out of the box. Optional settings:
+
+- `djangoStructureExplorer.sortOrder` — how tree items are sorted (`alphabetical`, `alphabeticalDesc`, `codeOrder`)
+- `djangoStructureExplorer.pythonPath` — Python interpreter used to run `manage.py` commands (e.g. `python`, `python3`, or a virtualenv path)
 
 ## Known Issues
 

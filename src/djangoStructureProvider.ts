@@ -22,6 +22,8 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
 
   private analyzer: DjangoProjectAnalyzer;
   private projectRoot: string | undefined;
+  /** Texto de filtro aplicado a los items hoja del árbol (Fase D). */
+  private filterText = '';
 
   constructor() {
     this.analyzer = new DjangoProjectAnalyzer();
@@ -30,6 +32,31 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
 
   refresh(): void {
     this.projectRoot = this.findDjangoProjectRoot();
+    this._onDidChangeTreeData.fire();
+  }
+
+  /** Raíz del proyecto Django (carpeta con manage.py), si la hay. */
+  getProjectRoot(): string | undefined {
+    return this.projectRoot;
+  }
+
+  /** Filtro activo actual (cadena vacía si no hay filtro). */
+  get currentFilter(): string {
+    return this.filterText;
+  }
+
+  /**
+   * Fija (o limpia) el filtro de items hoja y refresca el árbol. El filtro
+   * se aplica por subcadena (sin distinguir mayúsculas) sobre las etiquetas
+   * de los hijos de cada nodo; los nodos contenedores no se filtran.
+   */
+  setFilter(text: string): void {
+    this.filterText = text.trim();
+    vscode.commands.executeCommand(
+      'setContext',
+      'djangoStructureExplorer.filterActive',
+      this.filterText.length > 0
+    );
     this._onDidChangeTreeData.fire();
   }
 
@@ -224,6 +251,21 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
     // Los grupos raíz (Configuration, Applications) se devuelven en orden fijo
     // e intencional; no se ordenan con el comparador de datos de usuario.
     return items;
+  }
+
+  /**
+   * Aplica el filtro activo (por subcadena en la etiqueta) y luego ordena.
+   * Usar en los getters de items hoja en lugar de sortItems directamente.
+   */
+  private finalizeItems(items: DjangoTreeItem[]): DjangoTreeItem[] {
+    if (!this.filterText) {
+      return this.finalizeItems(items);
+    }
+    const needle = this.filterText.toLowerCase();
+    const filtered = items.filter(item =>
+      item.label.toString().toLowerCase().includes(needle)
+    );
+    return this.sortItems(filtered);
   }
 
   private sortItems(items: DjangoTreeItem[]): DjangoTreeItem[] {
@@ -530,7 +572,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       return modelItem;
     });
 
-    return this.sortItems(items);
+    return this.finalizeItems(items);
   }
 
   private async getViews(viewsPath: string): Promise<DjangoTreeItem[]> {
@@ -550,18 +592,37 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       viewItem.iconPath = view.isClass
         ? new vscode.ThemeIcon('symbol-class')
         : new vscode.ThemeIcon('symbol-method');
-      // Distinguir las vistas de DRF (ViewSet / APIView) de las normales.
+
+      // Etiqueta de tipo (DRF) y decoradores como descripción combinada.
+      const parts: string[] = [];
       if (view.apiKind === 'viewset') {
-        viewItem.description = 'DRF ViewSet';
+        parts.push('DRF ViewSet');
         viewItem.iconPath = new vscode.ThemeIcon('symbol-interface');
       } else if (view.apiKind === 'apiview') {
-        viewItem.description = 'DRF APIView';
+        parts.push('DRF APIView');
         viewItem.iconPath = new vscode.ThemeIcon('symbol-interface');
+      }
+
+      const decorators = view.decorators ?? [];
+      if (decorators.length > 0) {
+        const decoLabel = decorators.map(d => `@${d}`).join(' ');
+        parts.push(decoLabel);
+        // Marcar visualmente las vistas con control de acceso/protección.
+        const guarded = decorators.some(d =>
+          /login_required|permission_required|staff_member_required|user_passes_test|csrf_protect|csrf_exempt/.test(d)
+        );
+        if (guarded) {
+          viewItem.iconPath = new vscode.ThemeIcon('lock');
+        }
+        viewItem.tooltip = `${view.name}\nDecoradores: ${decoLabel}`;
+      }
+      if (parts.length > 0) {
+        viewItem.description = parts.join(' · ');
       }
       return viewItem;
     });
 
-    return this.sortItems(items);
+    return this.finalizeItems(items);
   }
 
   private async getTemplates(appPath: string): Promise<DjangoTreeItem[]> {
@@ -588,7 +649,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       return item;
     });
 
-    return this.sortItems(items);
+    return this.finalizeItems(items);
   }
 
   private async getSerializers(serializersPath: string): Promise<DjangoTreeItem[]> {
@@ -612,7 +673,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       return item;
     });
 
-    return this.sortItems(items);
+    return this.finalizeItems(items);
   }
 
   private async getSchemas(schemasPath: string): Promise<DjangoTreeItem[]> {
@@ -633,7 +694,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       return item;
     });
 
-    return this.sortItems(items);
+    return this.finalizeItems(items);
   }
 
   private async getApiEndpoints(element: DjangoTreeItem): Promise<DjangoTreeItem[]> {
@@ -670,7 +731,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       return item;
     });
 
-    return this.sortItems(items);
+    return this.finalizeItems(items);
   }
 
   private async getForms(formsPath: string): Promise<DjangoTreeItem[]> {
@@ -694,7 +755,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       return item;
     });
 
-    return this.sortItems(items);
+    return this.finalizeItems(items);
   }
 
   private async getSignals(signalsPath: string): Promise<DjangoTreeItem[]> {
@@ -716,7 +777,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       return item;
     });
 
-    return this.sortItems(items);
+    return this.finalizeItems(items);
   }
 
   private async getCommands(element: DjangoTreeItem): Promise<DjangoTreeItem[]> {
@@ -743,7 +804,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       return item;
     });
 
-    return this.sortItems(items);
+    return this.finalizeItems(items);
   }
 
   private async getCeleryTasks(tasksPath: string): Promise<DjangoTreeItem[]> {
@@ -764,7 +825,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       return item;
     });
 
-    return this.sortItems(items);
+    return this.finalizeItems(items);
   }
 
   private async getUrls(urlsPath: string): Promise<DjangoTreeItem[]> {
@@ -786,7 +847,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       return urlItem;
     });
 
-    return this.sortItems(items);
+    return this.finalizeItems(items);
   }
 
   private async getAdminClasses(adminPath: string): Promise<DjangoTreeItem[]> {
@@ -807,7 +868,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       return adminItem;
     });
 
-    return this.sortItems(items);
+    return this.finalizeItems(items);
   }
 
   private async getTasks(tasksPath: string): Promise<DjangoTreeItem[]> {
@@ -828,7 +889,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       return taskItem;
     });
 
-    return this.sortItems(items);
+    return this.finalizeItems(items);
   }
 
   private async getPartials(element: DjangoTreeItem): Promise<DjangoTreeItem[]> {
@@ -856,7 +917,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       return partialItem;
     });
 
-    return this.sortItems(items);
+    return this.finalizeItems(items);
   }
 
   private async getSettings(settingsDir: string): Promise<DjangoTreeItem[]> {
@@ -889,7 +950,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       return settingItem;
     });
 
-    return this.sortItems(items);
+    return this.finalizeItems(items);
   }
 
   private async getModelFields(modelItem: DjangoTreeItem): Promise<DjangoTreeItem[]> {

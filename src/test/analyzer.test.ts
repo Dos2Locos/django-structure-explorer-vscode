@@ -378,6 +378,37 @@ describe('DjangoProjectAnalyzer — red de seguridad de parsing (Fase 4)', () =>
     });
   });
 
+  // Decoradores de vistas (Fase D): se capturan los decoradores de nivel
+  // superior para señalar control de acceso/protección en el árbol.
+  describe('Decoradores en vistas', () => {
+    it('captura decoradores de nivel superior en vistas de función', async () => {
+      const views = await analyzer.extractViews(path.join(FIXTURES_NAV, 'blog', 'views.py'));
+      const dashboard = views.find(v => v.name === 'dashboard');
+      assert.deepStrictEqual(dashboard?.decorators, ['login_required']);
+
+      const manage = views.find(v => v.name === 'manage_authors');
+      assert.deepStrictEqual(
+        manage?.decorators,
+        ['permission_required', 'require_http_methods'],
+        'debe acumular varios decoradores apilados'
+      );
+    });
+
+    it('no asigna decoradores a vistas sin ellos ni los arrastra', async () => {
+      const views = await analyzer.extractViews(path.join(FIXTURES_NAV, 'blog', 'views.py'));
+      const publicIndex = views.find(v => v.name === 'public_index');
+      assert.strictEqual(publicIndex?.decorators, undefined, 'public_index no tiene decoradores');
+      const listView = views.find(v => v.name === 'AuthorListView');
+      assert.strictEqual(listView?.decorators, undefined, 'la clase posterior no hereda decoradores previos');
+    });
+
+    it('descarta el módulo y los argumentos del decorador (@api_view)', async () => {
+      const views = await analyzer.extractViews(path.join(FIXTURES_REST, 'views.py'));
+      const stats = views.find(v => v.name === 'stats');
+      assert.deepStrictEqual(stats?.decorators, ['api_view']);
+    });
+  });
+
   // Navegación cruzada (helpers puros que respaldan el DefinitionProvider).
   describe('Navegación cruzada', () => {
     it('findUrlName resuelve un nombre de URL (con y sin namespace)', async () => {
