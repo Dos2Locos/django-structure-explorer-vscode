@@ -139,6 +139,12 @@ export interface DjangoCeleryTask {
   lineNumber: number;
 }
 
+/** Ubicación de un símbolo resuelto, para navegación (go-to-definition). */
+export interface DjangoLocation {
+  filePath: string;
+  lineNumber: number;
+}
+
 export class DjangoProjectAnalyzer {
 
   /**
@@ -1468,6 +1474,93 @@ export class DjangoProjectAnalyzer {
     }
 
     return commands;
+  }
+
+  /**
+   * Lista las plantillas (.html) de una aplicación. Versión pública de
+   * findTemplateFiles para el nodo "Templates" del árbol.
+   */
+  async findAppTemplates(appPath: string): Promise<string[]> {
+    return this.findTemplateFiles(appPath);
+  }
+
+  /**
+   * Busca en todo el proyecto los ficheros con un nombre dado (p. ej. urls.py,
+   * models.py), incluyendo la raíz del proyecto y todos sus subdirectorios.
+   */
+  private async findProjectFiles(projectRoot: string, filename: string): Promise<string[]> {
+    const result: string[] = [];
+    const dirs = [projectRoot, ...await this.getDirectories(projectRoot)];
+    for (const dir of dirs) {
+      const candidate = path.join(dir, filename);
+      if (await pathExists(candidate)) {
+        result.push(candidate);
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Resuelve un nombre de URL (`reverse('app:detail')` / `{% url 'app:detail' %}`)
+   * a la línea `name='detail'` de un urls.py. Usa el último segmento tras ':',
+   * de modo que se ignora el namespace para localizar la definición.
+   */
+  async findUrlName(projectRoot: string, name: string): Promise<DjangoLocation | undefined> {
+    const segment = name.includes(':') ? (name.split(':').pop() || name) : name;
+    if (!segment) {
+      return undefined;
+    }
+    const nameRegex = new RegExp(`name\\s*=\\s*['"]${escapeRegExp(segment)}['"]`);
+    const urlsFiles = await this.findProjectFiles(projectRoot, 'urls.py');
+
+    for (const file of urlsFiles) {
+      const content = this.stripComments(await readFile(file, 'utf8'));
+      const lines = content.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        if (nameRegex.test(lines[i])) {
+          return { filePath: file, lineNumber: i };
+        }
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Resuelve una ruta de plantilla relativa (`"app/detail.html"`) al fichero
+   * .html correspondiente, buscando primero por sufijo `templates/<rel>` y, si
+   * no, por el propio sufijo relativo.
+   */
+  async findTemplateFile(projectRoot: string, relPath: string): Promise<string | undefined> {
+    const normalized = relPath.replace(/\\/g, '/').replace(/^\/+/, '');
+    const templates = await this.findTemplateFiles(projectRoot);
+    const bySuffix = (suffix: string): string | undefined =>
+      templates.find(file => file.replace(/\\/g, '/').endsWith(suffix));
+
+    return bySuffix(`templates/${normalized}`) || bySuffix(`/${normalized}`);
+  }
+
+  /**
+   * Resuelve una referencia de modelo (`'app.Author'` o `Author`) a la línea de
+   * su `class Author(...)` en algún models.py del proyecto.
+   */
+  async findModelClass(projectRoot: string, modelRef: string): Promise<DjangoLocation | undefined> {
+    const modelName = modelRef.includes('.') ? (modelRef.split('.').pop() || modelRef) : modelRef;
+    if (!modelName) {
+      return undefined;
+    }
+    const classRegex = new RegExp(`^class\\s+${escapeRegExp(modelName)}\\s*\\(`);
+    const modelsFiles = await this.findProjectFiles(projectRoot, 'models.py');
+
+    for (const file of modelsFiles) {
+      const content = this.stripComments(await readFile(file, 'utf8'));
+      const lines = content.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        if (classRegex.test(lines[i].trim())) {
+          return { filePath: file, lineNumber: i };
+        }
+      }
+    }
+    return undefined;
   }
 
   /**
