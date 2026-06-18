@@ -71,6 +71,22 @@ Con tests en `src/test/analyzer.test.ts` (fixtures `robustness/`) salvo los defe
 - **`extractUrls` consume hasta EOF si una llamada multilínea no cierra paréntesis**
   (defensivo; documentado).
 
+## Features (no son defectos)
+
+Compatibilidad con superficies nuevas de Django, no fallos del parser actual.
+
+- **Soporte para el framework de Tasks de Django 6.** Django 6.0 introduce un
+  framework de tareas en segundo plano (`tasks.py`, decoradores `@task`). La
+  extensión no tiene ningún nodo para tareas. Sería un nuevo tipo de nodo en el
+  árbol (analizar `tasks.py` por app, detectar funciones decoradas con `@task`),
+  análogo a `extractViews`. El resto del parser ya es agnóstico de versión y
+  funciona con Django 6 sin cambios: modelos, vistas, URLs, admin y settings usan
+  sintaxis no modificada, y los settings nuevos (p. ej. CSP) se capturan por la
+  regla genérica `NOMBRE = valor`. `CompositePrimaryKey` también se detecta ya por
+  el patrón `models.\w+`.
+- **(Opcional) Template partials de Django 6** (`{% partialdef %}` / `{% partial %}`):
+  requeriría analizar plantillas, superficie que la extensión nunca ha cubierto.
+
 ## Pendiente del parser (ver doc dedicado)
 
 Continuaciones de línea con `\` y f-strings con `{...}` anidados — en
