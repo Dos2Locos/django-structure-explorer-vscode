@@ -45,6 +45,13 @@ let manageTerminal: vscode.Terminal | undefined;
 const VALID_COMMAND_NAME = /^[A-Za-z0-9_]+$/;
 
 /**
+ * Ruta de intérprete admisible: nombre o ruta (con espacios) sin metacaracteres
+ * de shell. Evita inyección si pythonPath llegara a contener `;`, `|`, `&`, `$`,
+ * comillas invertidas o saltos de línea.
+ */
+const VALID_PYTHON_PATH = /^[A-Za-z0-9_.\/\\:\- ]+$/;
+
+/**
  * Ejecuta `python manage.py <commandLine>` en una terminal dedicada, ubicada en
  * la raíz del proyecto. El intérprete es configurable
  * (djangoStructureExplorer.pythonPath, por defecto "python").
@@ -53,6 +60,13 @@ function runManagePy(projectRoot: string, commandLine: string): void {
   const pythonPath = vscode.workspace
     .getConfiguration('djangoStructureExplorer')
     .get<string>('pythonPath', 'python');
+
+  if (!VALID_PYTHON_PATH.test(pythonPath)) {
+    vscode.window.showErrorMessage(
+      `Django Structure Explorer: djangoStructureExplorer.pythonPath no válido: ${pythonPath}`
+    );
+    return;
+  }
 
   if (!manageTerminal || manageTerminal.exitStatus !== undefined) {
     manageTerminal = vscode.window.createTerminal({ name: 'Django', cwd: projectRoot });
