@@ -44,7 +44,8 @@
         "djangoStructureExplorer.pythonPath": {
           "type": "string",
           "default": "python",
-          "description": "Python interpreter used to run manage.py commands (e.g. python, python3, or a virtualenv path)"
+          "scope": "machine",
+          "description": "Python interpreter used to run manage.py commands (e.g. python, python3, or a virtualenv path). Machine-scoped: cannot be overridden by workspace settings."
         }
       }
     },
