@@ -6,6 +6,9 @@ import { DjangoProjectAnalyzer } from '../djangoProjectAnalyzer';
 const FIXTURES = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'criticalapp');
 const FIXTURES_COMMENTS = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'commentsapp');
 const FIXTURES_CYCLE = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'robustness');
+const FIXTURES_DJ6 = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'django6app');
+const FIXTURES_CELERY = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'celeryapp');
+const FIXTURES_REST = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'restapp');
 
 describe('DjangoProjectAnalyzer — red de seguridad de parsing (Fase 4)', () => {
   const analyzer = new DjangoProjectAnalyzer();
@@ -225,6 +228,114 @@ describe('DjangoProjectAnalyzer — red de seguridad de parsing (Fase 4)', () =>
       const names = settings.map(s => s.name);
       // DATABASES (multilínea) no debe inyectar claves internas como settings.
       assert.ok(names.includes('REAL_SETTING'), 'falta REAL_SETTING tras el bloque multilínea');
+    });
+  });
+
+  // Django 6: framework de Tasks (tasks.py / @task) y partials de plantilla.
+  describe('Django 6 — Tasks y partials', () => {
+    describe('extractTasks', () => {
+      it('detecta funciones decoradas con @task y @task(...)', async () => {
+        const tasks = await analyzer.extractTasks(path.join(FIXTURES_DJ6, 'tasks.py'));
+        const names = tasks.map(t => t.name);
+        assert.ok(names.includes('send_welcome_email'), 'falta la tarea @task');
+        assert.ok(names.includes('rebuild_search_index'), 'falta la tarea @task(...)');
+      });
+
+      it('no marca como tareas las funciones sin decorador @task', async () => {
+        const tasks = await analyzer.extractTasks(path.join(FIXTURES_DJ6, 'tasks.py'));
+        const names = tasks.map(t => t.name);
+        assert.ok(!names.includes('helper_no_es_tarea'), 'no debe capturar una función sin @task');
+        assert.ok(!names.includes('funcion_normal'), 'no debe capturar una función normal');
+      });
+
+      it('no detecta tareas de Celery (sin import de django.tasks)', async () => {
+        const tasks = await analyzer.extractTasks(path.join(FIXTURES_CELERY, 'tasks.py'));
+        assert.strictEqual(tasks.length, 0, 'no debe confundir @shared_task/@app.task con Tasks de Django');
+      });
+    });
+
+    describe('extractPartials / findAppPartials', () => {
+      it('detecta las definiciones partialdef, incluida la variante inline', async () => {
+        const partials = await analyzer.findAppPartials(FIXTURES_DJ6);
+        const names = partials.map(p => p.name);
+        assert.ok(names.includes('product-card'), 'falta el partial product-card');
+        assert.ok(names.includes('sidebar'), 'falta el partial sidebar (inline)');
+      });
+
+      it('ignora partialdef dentro de comentarios y el uso {% partial %}', async () => {
+        const partials = await analyzer.findAppPartials(FIXTURES_DJ6);
+        const names = partials.map(p => p.name);
+        assert.ok(!names.includes('partial-comentado'), 'no debe detectar un partialdef comentado');
+        // {% partial product-card %} es uso, no definición: no debe duplicar.
+        const productCard = partials.filter(p => p.name === 'product-card');
+        assert.strictEqual(productCard.length, 1, 'el uso {% partial %} no debe contar como definición');
+      });
+    });
+  });
+
+  // DRF + django-ninja: serializers, schemas, endpoints y marcado de ViewSets.
+  describe('DRF y django-ninja', () => {
+    describe('extractSerializers', () => {
+      it('detecta serializers de DRF y asocia el modelo de Meta', async () => {
+        const serializers = await analyzer.extractSerializers(path.join(FIXTURES_REST, 'serializers.py'));
+        const names = serializers.map(s => s.name);
+        assert.ok(names.includes('ArticleSerializer'), 'falta ArticleSerializer');
+        assert.ok(names.includes('PlainSerializer'), 'falta PlainSerializer');
+        assert.ok(!names.includes('NoEsSerializer'), 'no debe capturar una clase que no es serializer');
+        const article = serializers.find(s => s.name === 'ArticleSerializer');
+        assert.strictEqual(article?.modelName, 'Article', 'debe asociar el modelo Article del Meta');
+      });
+    });
+
+    describe('extractSchemas', () => {
+      it('detecta schemas de ninja (Schema y ModelSchema)', async () => {
+        const schemas = await analyzer.extractSchemas(path.join(FIXTURES_REST, 'schemas.py'));
+        const names = schemas.map(s => s.name);
+        assert.ok(names.includes('ArticleOut'), 'falta ArticleOut (Schema)');
+        assert.ok(names.includes('ArticleIn'), 'falta ArticleIn (ModelSchema)');
+        assert.ok(!names.includes('NoEsSchema'), 'no debe capturar una clase que no es schema');
+      });
+    });
+
+    describe('extractNinjaEndpoints', () => {
+      it('detecta operaciones @api/@router con método y ruta', async () => {
+        const endpoints = await analyzer.extractNinjaEndpoints(path.join(FIXTURES_REST, 'api.py'));
+        const list = endpoints.find(e => e.handler === 'list_articles');
+        assert.ok(list, 'falta el endpoint list_articles');
+        assert.strictEqual(list?.method, 'GET');
+        assert.strictEqual(list?.path, '/articles');
+        const create = endpoints.find(e => e.handler === 'create_article');
+        assert.strictEqual(create?.method, 'POST');
+        assert.strictEqual(create?.path, '/articles/{article_id}');
+        assert.ok(endpoints.every(e => e.framework === 'ninja'), 'todos deben ser ninja');
+      });
+    });
+
+    describe('extractDrfEndpoints', () => {
+      it('detecta @api_view y @action, no las funciones normales', async () => {
+        const endpoints = await analyzer.extractDrfEndpoints(path.join(FIXTURES_REST, 'views.py'));
+        const handlers = endpoints.map(e => e.handler);
+        assert.ok(handlers.includes('stats'), 'falta el endpoint @api_view stats');
+        assert.ok(handlers.includes('publish'), 'falta la acción @action publish');
+        assert.ok(!handlers.includes('vista_normal'), 'no debe capturar una vista normal');
+
+        const stats = endpoints.find(e => e.handler === 'stats');
+        assert.ok(stats?.method.includes('GET') && stats?.method.includes('POST'), 'stats debe listar GET y POST');
+        const publish = endpoints.find(e => e.handler === 'publish');
+        assert.strictEqual(publish?.method, 'POST');
+        assert.strictEqual(publish?.path, 'publish', 'debe usar el url_path de la acción');
+      });
+    });
+
+    describe('extractViews — marcado DRF', () => {
+      it('marca ViewSets y APIView/generics, deja las vistas normales sin marca', async () => {
+        const views = await analyzer.extractViews(path.join(FIXTURES_REST, 'views.py'));
+        const byName = (n: string) => views.find(v => v.name === n);
+        assert.strictEqual(byName('ArticleViewSet')?.apiKind, 'viewset');
+        assert.strictEqual(byName('ArticleListView')?.apiKind, 'apiview', 'ListAPIView termina en APIView');
+        assert.strictEqual(byName('PingView')?.apiKind, 'apiview');
+        assert.strictEqual(byName('vista_normal')?.apiKind, undefined, 'una vista normal no debe marcarse');
+      });
     });
   });
 });

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ModelField } from './djangoProjectAnalyzer';
+import { ModelField, DjangoPartial, DjangoApiEndpoint } from './djangoProjectAnalyzer';
 
 export class DjangoTreeItem extends vscode.TreeItem {
   /**
@@ -7,6 +7,18 @@ export class DjangoTreeItem extends vscode.TreeItem {
    * Tipado explícito en lugar del antiguo canal lateral `(item as any).modelFields`.
    */
   public modelFields?: ModelField[];
+
+  /**
+   * Partials de plantilla asociados a este item (solo para items 'partials').
+   * Se cachean al construir el nodo de la app para no reescanear al expandir.
+   */
+  public partials?: DjangoPartial[];
+
+  /**
+   * Endpoints REST (django-ninja + DRF) cacheados al construir el nodo 'api'
+   * de la app, para no reescanear varios ficheros al expandir.
+   */
+  public apiEndpoints?: DjangoApiEndpoint[];
 
   constructor(
     public readonly label: string,

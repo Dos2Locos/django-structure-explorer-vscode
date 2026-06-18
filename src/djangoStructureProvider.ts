@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { DjangoTreeItem } from './djangoTreeItem';
-import { DjangoProjectAnalyzer, ModelField } from './djangoProjectAnalyzer';
+import { DjangoProjectAnalyzer, ModelField, DjangoApiEndpoint } from './djangoProjectAnalyzer';
 
 /**
  * Comprueba de forma asíncrona si una ruta existe, sin bloquear el event loop.
@@ -125,7 +125,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
 
     // Las ramas restantes requieren un resourceUri asociado.
     // Guardamos contra resourceUri ausente en lugar de usar aserciones non-null.
-    const uriContexts = ['app', 'models', 'views', 'urls', 'admin', 'main-urls', 'settings'];
+    const uriContexts = ['app', 'models', 'views', 'urls', 'admin', 'main-urls', 'settings', 'tasks', 'partials', 'serializers', 'schemas', 'api'];
     if (uriContexts.includes(element.contextValue ?? '')) {
       if (!element.resourceUri) {
         return [];
@@ -145,6 +145,16 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
           return this.getAdminClasses(fsPath);
         case 'settings':
           return this.getSettings(fsPath);
+        case 'tasks':
+          return this.getTasks(fsPath);
+        case 'partials':
+          return this.getPartials(element);
+        case 'serializers':
+          return this.getSerializers(fsPath);
+        case 'schemas':
+          return this.getSchemas(fsPath);
+        case 'api':
+          return this.getApiEndpoints(element);
       }
     }
 
@@ -293,6 +303,103 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       items.push(adminItem);
     }
 
+    // Tasks (framework de Tasks de Django 6)
+    const tasksPath = path.join(appPath, 'tasks.py');
+    if (await pathExists(tasksPath)) {
+      const tasksItem = new DjangoTreeItem(
+        'Tasks',
+        vscode.TreeItemCollapsibleState.Collapsed,
+        {
+          command: 'djangoStructureExplorer.openFile',
+          title: 'Open Tasks',
+          arguments: [tasksPath]
+        },
+        vscode.Uri.file(tasksPath),
+        'tasks'
+      );
+      tasksItem.iconPath = new vscode.ThemeIcon('checklist');
+      items.push(tasksItem);
+    }
+
+    // Partials de plantilla (Django 6). Solo se añade el nodo si la app define
+    // alguno; los partials encontrados se cachean en el item para no reescanear.
+    const partials = await this.analyzer.findAppPartials(appPath);
+    if (partials.length > 0) {
+      const partialsItem = new DjangoTreeItem(
+        'Partials',
+        vscode.TreeItemCollapsibleState.Collapsed,
+        undefined,
+        vscode.Uri.file(appPath),
+        'partials'
+      );
+      partialsItem.iconPath = new vscode.ThemeIcon('symbol-snippet');
+      partialsItem.partials = partials;
+      items.push(partialsItem);
+    }
+
+    // Serializers de DRF (serializers.py)
+    const serializersPath = path.join(appPath, 'serializers.py');
+    if (await pathExists(serializersPath)) {
+      const serializersItem = new DjangoTreeItem(
+        'Serializers',
+        vscode.TreeItemCollapsibleState.Collapsed,
+        {
+          command: 'djangoStructureExplorer.openFile',
+          title: 'Open Serializers',
+          arguments: [serializersPath]
+        },
+        vscode.Uri.file(serializersPath),
+        'serializers'
+      );
+      serializersItem.iconPath = new vscode.ThemeIcon('symbol-class');
+      items.push(serializersItem);
+    }
+
+    // Schemas de django-ninja (schemas.py)
+    const schemasPath = path.join(appPath, 'schemas.py');
+    if (await pathExists(schemasPath)) {
+      const schemasItem = new DjangoTreeItem(
+        'Schemas',
+        vscode.TreeItemCollapsibleState.Collapsed,
+        {
+          command: 'djangoStructureExplorer.openFile',
+          title: 'Open Schemas',
+          arguments: [schemasPath]
+        },
+        vscode.Uri.file(schemasPath),
+        'schemas'
+      );
+      schemasItem.iconPath = new vscode.ThemeIcon('symbol-interface');
+      items.push(schemasItem);
+    }
+
+    // API REST: endpoints de django-ninja (api.py) + DRF basados en decorador
+    // (@api_view/@action en views.py/viewsets.py). Los router.register() de DRF
+    // ya se muestran en el nodo URLs.
+    const apiEndpoints: DjangoApiEndpoint[] = [];
+    const apiPath = path.join(appPath, 'api.py');
+    if (await pathExists(apiPath)) {
+      apiEndpoints.push(...await this.analyzer.extractNinjaEndpoints(apiPath));
+    }
+    for (const drfFile of ['views.py', 'viewsets.py']) {
+      const drfPath = path.join(appPath, drfFile);
+      if (await pathExists(drfPath)) {
+        apiEndpoints.push(...await this.analyzer.extractDrfEndpoints(drfPath));
+      }
+    }
+    if (apiEndpoints.length > 0) {
+      const apiItem = new DjangoTreeItem(
+        'API',
+        vscode.TreeItemCollapsibleState.Collapsed,
+        undefined,
+        vscode.Uri.file(appPath),
+        'api'
+      );
+      apiItem.iconPath = new vscode.ThemeIcon('plug');
+      apiItem.apiEndpoints = apiEndpoints;
+      items.push(apiItem);
+    }
+
     return items;
   }
 
@@ -347,7 +454,97 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       viewItem.iconPath = view.isClass
         ? new vscode.ThemeIcon('symbol-class')
         : new vscode.ThemeIcon('symbol-method');
+      // Distinguir las vistas de DRF (ViewSet / APIView) de las normales.
+      if (view.apiKind === 'viewset') {
+        viewItem.description = 'DRF ViewSet';
+        viewItem.iconPath = new vscode.ThemeIcon('symbol-interface');
+      } else if (view.apiKind === 'apiview') {
+        viewItem.description = 'DRF APIView';
+        viewItem.iconPath = new vscode.ThemeIcon('symbol-interface');
+      }
       return viewItem;
+    });
+
+    return this.sortItems(items);
+  }
+
+  private async getSerializers(serializersPath: string): Promise<DjangoTreeItem[]> {
+    const serializers = await this.analyzer.extractSerializers(serializersPath);
+    const items = serializers.map(serializer => {
+      const item = new DjangoTreeItem(
+        serializer.name,
+        vscode.TreeItemCollapsibleState.None,
+        {
+          command: 'djangoStructureExplorer.openFile',
+          title: 'Open Serializer',
+          arguments: [serializersPath, serializer.lineNumber]
+        },
+        vscode.Uri.file(serializersPath),
+        'serializer'
+      );
+      item.iconPath = new vscode.ThemeIcon('symbol-class');
+      if (serializer.modelName) {
+        item.description = serializer.modelName;
+      }
+      return item;
+    });
+
+    return this.sortItems(items);
+  }
+
+  private async getSchemas(schemasPath: string): Promise<DjangoTreeItem[]> {
+    const schemas = await this.analyzer.extractSchemas(schemasPath);
+    const items = schemas.map(schema => {
+      const item = new DjangoTreeItem(
+        schema.name,
+        vscode.TreeItemCollapsibleState.None,
+        {
+          command: 'djangoStructureExplorer.openFile',
+          title: 'Open Schema',
+          arguments: [schemasPath, schema.lineNumber]
+        },
+        vscode.Uri.file(schemasPath),
+        'schema'
+      );
+      item.iconPath = new vscode.ThemeIcon('symbol-interface');
+      return item;
+    });
+
+    return this.sortItems(items);
+  }
+
+  private async getApiEndpoints(element: DjangoTreeItem): Promise<DjangoTreeItem[]> {
+    let endpoints = element.apiEndpoints ?? [];
+    if (endpoints.length === 0 && element.resourceUri) {
+      const appPath = element.resourceUri.fsPath;
+      const apiPath = path.join(appPath, 'api.py');
+      if (await pathExists(apiPath)) {
+        endpoints = endpoints.concat(await this.analyzer.extractNinjaEndpoints(apiPath));
+      }
+      for (const drfFile of ['views.py', 'viewsets.py']) {
+        const drfPath = path.join(appPath, drfFile);
+        if (await pathExists(drfPath)) {
+          endpoints = endpoints.concat(await this.analyzer.extractDrfEndpoints(drfPath));
+        }
+      }
+    }
+
+    const items = endpoints.map(endpoint => {
+      const label = endpoint.path ? `${endpoint.method} ${endpoint.path}` : endpoint.method;
+      const item = new DjangoTreeItem(
+        label,
+        vscode.TreeItemCollapsibleState.None,
+        {
+          command: 'djangoStructureExplorer.openFile',
+          title: 'Open Endpoint',
+          arguments: [endpoint.filePath, endpoint.lineNumber]
+        },
+        vscode.Uri.file(endpoint.filePath),
+        'api-endpoint'
+      );
+      item.description = `${endpoint.framework} · ${endpoint.handler}`;
+      item.iconPath = new vscode.ThemeIcon('symbol-event');
+      return item;
     });
 
     return this.sortItems(items);
@@ -391,6 +588,55 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       );
       adminItem.iconPath = new vscode.ThemeIcon('symbol-class');
       return adminItem;
+    });
+
+    return this.sortItems(items);
+  }
+
+  private async getTasks(tasksPath: string): Promise<DjangoTreeItem[]> {
+    const tasks = await this.analyzer.extractTasks(tasksPath);
+    const items = tasks.map(task => {
+      const taskItem = new DjangoTreeItem(
+        task.name,
+        vscode.TreeItemCollapsibleState.None,
+        {
+          command: 'djangoStructureExplorer.openFile',
+          title: 'Open Task',
+          arguments: [tasksPath, task.lineNumber]
+        },
+        vscode.Uri.file(tasksPath),
+        'task'
+      );
+      taskItem.iconPath = new vscode.ThemeIcon('symbol-event');
+      return taskItem;
+    });
+
+    return this.sortItems(items);
+  }
+
+  private async getPartials(element: DjangoTreeItem): Promise<DjangoTreeItem[]> {
+    // Partials cacheados al construir el nodo de la app; si faltan (p. ej. nodo
+    // reconstruido), se reescanean a partir de la ruta de la app.
+    let partials = element.partials ?? [];
+    if (partials.length === 0 && element.resourceUri) {
+      partials = await this.analyzer.findAppPartials(element.resourceUri.fsPath);
+    }
+
+    const items = partials.map(partial => {
+      const partialItem = new DjangoTreeItem(
+        partial.name,
+        vscode.TreeItemCollapsibleState.None,
+        {
+          command: 'djangoStructureExplorer.openFile',
+          title: 'Open Partial',
+          arguments: [partial.templatePath, partial.lineNumber]
+        },
+        vscode.Uri.file(partial.templatePath),
+        'partial'
+      );
+      partialItem.description = path.basename(partial.templatePath);
+      partialItem.iconPath = new vscode.ThemeIcon('symbol-snippet');
+      return partialItem;
     });
 
     return this.sortItems(items);

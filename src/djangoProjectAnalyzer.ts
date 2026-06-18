@@ -55,6 +55,8 @@ export interface DjangoView {
   name: string;
   lineNumber: number;
   isClass: boolean;
+  /** Marca las vistas de DRF: ViewSet (router) o APIView/generics. */
+  apiKind?: 'viewset' | 'apiview';
 }
 
 export interface DjangoUrl {
@@ -73,6 +75,42 @@ export interface DjangoSetting {
   name: string;
   value: string;
   lineNumber: number;
+}
+
+/** Tarea del framework de Tasks de Django 6 (django.tasks). */
+export interface DjangoTask {
+  name: string;
+  lineNumber: number;
+}
+
+/** Partial de plantilla de Django 6 ({% partialdef nombre %}). */
+export interface DjangoPartial {
+  name: string;
+  lineNumber: number;
+  templatePath: string;
+}
+
+/** Serializer de Django REST Framework (serializers.py). */
+export interface DjangoSerializer {
+  name: string;
+  lineNumber: number;
+  modelName?: string;
+}
+
+/** Schema de django-ninja (schemas.py): clase Schema / ModelSchema. */
+export interface DjangoSchema {
+  name: string;
+  lineNumber: number;
+}
+
+/** Endpoint REST de django-ninja (@api/@router.<método>) o DRF (@api_view/@action). */
+export interface DjangoApiEndpoint {
+  method: string;
+  path: string;
+  handler: string;
+  lineNumber: number;
+  framework: 'ninja' | 'drf';
+  filePath: string;
 }
 
 export class DjangoProjectAnalyzer {
@@ -619,8 +657,8 @@ export class DjangoProjectAnalyzer {
 
       // Expresión regular para encontrar funciones de vista
       const functionViewRegex = /^def\s+(\w+)\s*\(/;
-      // Expresión regular para encontrar clases de vista
-      const classViewRegex = /^class\s+(\w+)\s*\(/;
+      // Clase de vista, capturando las clases base para distinguir DRF.
+      const classViewRegex = /^class\s+(\w+)\s*\(([^)]*)\)?/;
 
       for (let i = 0; i < lines.length; i++) {
         const functionMatch = lines[i].match(functionViewRegex);
@@ -635,10 +673,23 @@ export class DjangoProjectAnalyzer {
 
         const classMatch = lines[i].match(classViewRegex);
         if (classMatch) {
+          // Clasificar como DRF según la clase base: *ViewSet (routers) o
+          // *APIView / *GenericAPIView (APIView y vistas genéricas).
+          const bases = (classMatch[2] || '')
+            .split(',')
+            .map(b => (b.trim().split('.').pop() || '').trim());
+          let apiKind: 'viewset' | 'apiview' | undefined;
+          if (bases.some(b => /ViewSet$/.test(b))) {
+            apiKind = 'viewset';
+          } else if (bases.some(b => /APIView$/.test(b))) {
+            apiKind = 'apiview';
+          }
+
           views.push({
             name: classMatch[1],
             lineNumber: i,
-            isClass: true
+            isClass: true,
+            apiKind
           });
         }
       }
@@ -918,6 +969,350 @@ export class DjangoProjectAnalyzer {
     }
 
     return settings;
+  }
+
+  /**
+   * Extrae las tareas de un archivo tasks.py del framework de Tasks de Django 6.
+   *
+   * Detecta funciones decoradas con `@task` (o su alias) importado de
+   * `django.tasks`. Se EXIGE el import `from django.tasks import task[ as alias]`
+   * para identificar el decorador: así se evitan falsos positivos con `@task` de
+   * otros frameworks (p. ej. Celery, que además usa `@shared_task`/`@app.task`).
+   */
+  async extractTasks(tasksPath: string): Promise<DjangoTask[]> {
+    const tasks: DjangoTask[] = [];
+
+    try {
+      const content = this.stripComments(await readFile(tasksPath, 'utf8'));
+      const lines = content.split('\n');
+
+      // Nombres de decorador que corresponden a django.tasks.task (con o sin alias).
+      const taskDecorators = new Set<string>();
+      for (const raw of lines) {
+        const importMatch = raw.trim().match(/^from\s+django\.tasks\s+import\s+(.+)$/);
+        if (importMatch) {
+          importMatch[1].split(',').forEach(part => {
+            const aliasMatch = part.trim().match(/^task(?:\s+as\s+(\w+))?$/);
+            if (aliasMatch) {
+              taskDecorators.add(aliasMatch[1] || 'task');
+            }
+          });
+        }
+      }
+
+      // Sin import de django.tasks no hay nada que identificar como tarea.
+      if (taskDecorators.size === 0) {
+        return tasks;
+      }
+
+      const decoratorRegex = /^@(\w+)\b/;
+      const defRegex = /^(?:async\s+)?def\s+(\w+)\s*\(/;
+      let pending = false;
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+
+        const decoratorMatch = line.match(decoratorRegex);
+        if (decoratorMatch) {
+          // Los decoradores pueden apilarse (@task + @otro): basta con que uno
+          // sea de django.tasks para marcar la siguiente función como tarea.
+          if (taskDecorators.has(decoratorMatch[1])) {
+            pending = true;
+          }
+          continue;
+        }
+
+        const defMatch = line.match(defRegex);
+        if (defMatch) {
+          if (pending) {
+            tasks.push({ name: defMatch[1], lineNumber: i });
+          }
+          pending = false;
+          continue;
+        }
+
+        // Cualquier otra línea no vacía rompe la cadena decorador→def.
+        if (line !== '') {
+          pending = false;
+        }
+      }
+    } catch (error) {
+      reportError('Error al analizar tareas', error);
+    }
+
+    return tasks;
+  }
+
+  /**
+   * Extrae las definiciones de partials de un archivo de plantilla de Django 6
+   * (`{% partialdef nombre %}`). Ignora las definiciones dentro de comentarios de
+   * plantilla `{# ... #}`. No confunde el uso `{% partial nombre %}` con la
+   * definición `{% partialdef ... %}`.
+   */
+  async extractPartials(templatePath: string): Promise<DjangoPartial[]> {
+    const partials: DjangoPartial[] = [];
+
+    try {
+      const content = await readFile(templatePath, 'utf8');
+      // Neutralizar comentarios de plantilla {# ... #} conservando los '\n'.
+      const cleaned = content.replace(/\{#[\s\S]*?#\}/g, block =>
+        block.replace(/[^\n]/g, ' ')
+      );
+
+      // El nombre de un partial admite letras, dígitos, guiones, guiones bajos y puntos.
+      const partialdefRegex = /\{%\s*partialdef\s+([\w.-]+)/g;
+      let match: RegExpExecArray | null;
+      while ((match = partialdefRegex.exec(cleaned)) !== null) {
+        const lineNumber = cleaned.substring(0, match.index).split('\n').length - 1;
+        partials.push({ name: match[1], lineNumber, templatePath });
+      }
+    } catch (error) {
+      reportError('Error al analizar partials de plantilla', error);
+    }
+
+    return partials;
+  }
+
+  /**
+   * Recorre las plantillas (.html) de una aplicación y agrega todos los partials
+   * definidos en ellas, conservando la ruta de cada plantilla de origen.
+   */
+  async findAppPartials(appPath: string): Promise<DjangoPartial[]> {
+    const result: DjangoPartial[] = [];
+    const templateFiles = await this.findTemplateFiles(appPath);
+
+    for (const file of templateFiles) {
+      const partials = await this.extractPartials(file);
+      result.push(...partials);
+    }
+
+    return result;
+  }
+
+  /**
+   * Extrae los serializers de DRF de un archivo serializers.py: clases cuya
+   * clase base termina en `Serializer` (ModelSerializer, Serializer, custom…).
+   * Intenta asociar el modelo declarado en `class Meta: model = X`.
+   */
+  async extractSerializers(serializersPath: string): Promise<DjangoSerializer[]> {
+    const serializers: DjangoSerializer[] = [];
+
+    try {
+      const content = this.stripComments(await readFile(serializersPath, 'utf8'));
+      const lines = content.split('\n');
+      const classRegex = /^class\s+(\w+)\s*\(([^)]*)\)/;
+
+      for (let i = 0; i < lines.length; i++) {
+        const match = lines[i].match(classRegex);
+        if (!match) {
+          continue;
+        }
+        const bases = match[2].split(',').map(b => (b.trim().split('.').pop() || '').trim());
+        if (!bases.some(b => /Serializer$/.test(b))) {
+          continue;
+        }
+
+        // Buscar `model = X` dentro del cuerpo de la clase (hasta la siguiente
+        // clase en columna 0), normalmente dentro de `class Meta:`.
+        let modelName: string | undefined;
+        for (let j = i + 1; j < lines.length; j++) {
+          if (/^class\s/.test(lines[j])) {
+            break;
+          }
+          const modelMatch = lines[j].match(/^\s+model\s*=\s*(\w+)/);
+          if (modelMatch) {
+            modelName = modelMatch[1];
+            break;
+          }
+        }
+
+        serializers.push({ name: match[1], lineNumber: i, modelName });
+      }
+    } catch (error) {
+      reportError('Error al analizar serializers', error);
+    }
+
+    return serializers;
+  }
+
+  /**
+   * Extrae los schemas de django-ninja de un archivo schemas.py: clases cuya
+   * clase base termina en `Schema` (Schema, ModelSchema, custom…).
+   */
+  async extractSchemas(schemasPath: string): Promise<DjangoSchema[]> {
+    const schemas: DjangoSchema[] = [];
+
+    try {
+      const content = this.stripComments(await readFile(schemasPath, 'utf8'));
+      const lines = content.split('\n');
+      const classRegex = /^class\s+(\w+)\s*\(([^)]*)\)/;
+
+      for (let i = 0; i < lines.length; i++) {
+        const match = lines[i].match(classRegex);
+        if (!match) {
+          continue;
+        }
+        const bases = match[2].split(',').map(b => (b.trim().split('.').pop() || '').trim());
+        if (bases.some(b => /Schema$/.test(b))) {
+          schemas.push({ name: match[1], lineNumber: i });
+        }
+      }
+    } catch (error) {
+      reportError('Error al analizar schemas', error);
+    }
+
+    return schemas;
+  }
+
+  /**
+   * Extrae los endpoints de django-ninja de un archivo api.py: operaciones
+   * decoradas `@<objeto>.<método>(...)` con método get/post/put/patch/delete
+   * (p. ej. `@api.get("/items")`, `@router.post("/items/{id}")`).
+   */
+  async extractNinjaEndpoints(apiPath: string): Promise<DjangoApiEndpoint[]> {
+    const endpoints: DjangoApiEndpoint[] = [];
+
+    try {
+      const content = this.stripComments(await readFile(apiPath, 'utf8'));
+      const lines = content.split('\n');
+      const decoratorRegex = /^@(\w+)\.(get|post|put|patch|delete)\s*\(/;
+      const defRegex = /^(?:async\s+)?def\s+(\w+)\s*\(/;
+
+      let pendingMethod: string | null = null;
+      let pendingPath = '';
+      let pendingLine = 0;
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+
+        const decoratorMatch = line.match(decoratorRegex);
+        if (decoratorMatch) {
+          pendingMethod = decoratorMatch[2].toUpperCase();
+          const pathMatch = line.match(/['"]([^'"]*)['"]/);
+          pendingPath = pathMatch ? pathMatch[1] : '';
+          pendingLine = i;
+          continue;
+        }
+
+        const defMatch = line.match(defRegex);
+        if (defMatch && pendingMethod) {
+          endpoints.push({
+            method: pendingMethod,
+            path: pendingPath,
+            handler: defMatch[1],
+            lineNumber: pendingLine,
+            framework: 'ninja',
+            filePath: apiPath
+          });
+          pendingMethod = null;
+        }
+      }
+    } catch (error) {
+      reportError('Error al analizar endpoints de django-ninja', error);
+    }
+
+    return endpoints;
+  }
+
+  /**
+   * Extrae los endpoints de DRF basados en decorador de un archivo (views.py /
+   * viewsets.py): funciones `@api_view([...])` y acciones extra `@action(...)`
+   * de los ViewSets. Las rutas de router.register() ya se ven en el nodo URLs.
+   */
+  async extractDrfEndpoints(filePath: string): Promise<DjangoApiEndpoint[]> {
+    const endpoints: DjangoApiEndpoint[] = [];
+
+    try {
+      const content = this.stripComments(await readFile(filePath, 'utf8'));
+      const lines = content.split('\n');
+      const defRegex = /^(?:async\s+)?def\s+(\w+)\s*\(/;
+
+      const parseMethods = (raw: string): string[] =>
+        raw.split(',').map(s => s.replace(/['"]/g, '').trim()).filter(Boolean);
+
+      let pending: { method: string; path: string; line: number } | null = null;
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+
+        const apiViewMatch = line.match(/^@api_view\s*\(\s*\[([^\]]*)\]/);
+        if (apiViewMatch) {
+          const methods = parseMethods(apiViewMatch[1]);
+          pending = { method: (methods.join(', ') || 'GET').toUpperCase(), path: '', line: i };
+          continue;
+        }
+
+        const actionMatch = line.match(/^@action\s*\(/);
+        if (actionMatch) {
+          const methodsMatch = line.match(/methods\s*=\s*\[([^\]]*)\]/);
+          const methods = methodsMatch ? parseMethods(methodsMatch[1]) : [];
+          const urlPathMatch = line.match(/url_path\s*=\s*['"]([^'"]*)['"]/);
+          pending = {
+            method: (methods.join(', ') || 'GET').toUpperCase(),
+            path: urlPathMatch ? urlPathMatch[1] : '',
+            line: i
+          };
+          continue;
+        }
+
+        const defMatch = line.match(defRegex);
+        if (defMatch && pending) {
+          endpoints.push({
+            method: pending.method,
+            path: pending.path || defMatch[1],
+            handler: defMatch[1],
+            lineNumber: pending.line,
+            framework: 'drf',
+            filePath
+          });
+          pending = null;
+        }
+      }
+    } catch (error) {
+      reportError('Error al analizar endpoints de DRF', error);
+    }
+
+    return endpoints;
+  }
+
+  /**
+   * Busca recursivamente archivos .html dentro de una aplicación, limitando la
+   * profundidad y excluyendo directorios pesados, igual que getDirectories.
+   */
+  private async findTemplateFiles(dir: string, depth: number = 0): Promise<string[]> {
+    const files: string[] = [];
+    const MAX_DEPTH = 8;
+    const EXCLUDED_DIRS = new Set<string>([
+      'node_modules', 'venv', '.venv', 'env', 'site-packages',
+      '.git', '.tox', '.mypy_cache', '.pytest_cache'
+    ]);
+
+    if (depth > MAX_DEPTH) {
+      return files;
+    }
+
+    try {
+      const entries = await readdir(dir, { withFileTypes: true });
+
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+
+        if (entry.isDirectory()) {
+          if (entry.name.startsWith('.') || EXCLUDED_DIRS.has(entry.name)) {
+            continue;
+          }
+          files.push(...await this.findTemplateFiles(fullPath, depth + 1));
+        } else if (entry.isFile() && entry.name.endsWith('.html')) {
+          files.push(fullPath);
+        }
+      }
+    } catch (error) {
+      // Rutas sin permisos: registrar sin interrumpir.
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[DjangoStructureExplorer] Error al leer plantillas en "${dir}": ${message}`);
+    }
+
+    return files;
   }
 
   /**

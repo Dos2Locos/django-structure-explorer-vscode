@@ -1,0 +1,17 @@
+{% load partials %}
+
+{% partialdef product-card %}
+<div class="card">
+  <h2>{{ producto.nombre }}</h2>
+</div>
+{% endpartialdef %}
+
+{% partialdef sidebar inline %}
+<aside>Barra lateral</aside>
+{% endpartialdef %}
+
+{# {% partialdef partial-comentado %} no debe detectarse #}
+
+<main>
+  {% partial product-card %}
+</main>
