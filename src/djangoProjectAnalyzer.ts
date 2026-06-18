@@ -113,6 +113,32 @@ export interface DjangoApiEndpoint {
   filePath: string;
 }
 
+/** Formulario de Django (forms.py): clase Form / ModelForm. */
+export interface DjangoForm {
+  name: string;
+  lineNumber: number;
+  modelName?: string;
+}
+
+/** Señal de Django (signals.py): receiver decorado o señal personalizada. */
+export interface DjangoSignal {
+  name: string;
+  lineNumber: number;
+  kind: 'receiver' | 'signal';
+}
+
+/** Comando de gestión (management/commands/<nombre>.py). */
+export interface DjangoCommand {
+  name: string;
+  filePath: string;
+}
+
+/** Tarea de Celery (tasks.py): @shared_task / @app.task. */
+export interface DjangoCeleryTask {
+  name: string;
+  lineNumber: number;
+}
+
 export class DjangoProjectAnalyzer {
 
   /**
@@ -1273,6 +1299,175 @@ export class DjangoProjectAnalyzer {
     }
 
     return endpoints;
+  }
+
+  /**
+   * Extrae los formularios de un archivo forms.py: clases cuya clase base termina
+   * en `Form` (Form, ModelForm, custom…). Asocia el modelo de `class Meta: model`.
+   */
+  async extractForms(formsPath: string): Promise<DjangoForm[]> {
+    const forms: DjangoForm[] = [];
+
+    try {
+      const content = this.stripComments(await readFile(formsPath, 'utf8'));
+      const lines = content.split('\n');
+      const classRegex = /^class\s+(\w+)\s*\(([^)]*)\)/;
+
+      for (let i = 0; i < lines.length; i++) {
+        const match = lines[i].match(classRegex);
+        if (!match) {
+          continue;
+        }
+        const bases = match[2].split(',').map(b => (b.trim().split('.').pop() || '').trim());
+        if (!bases.some(b => /Form$/.test(b))) {
+          continue;
+        }
+
+        let modelName: string | undefined;
+        for (let j = i + 1; j < lines.length; j++) {
+          if (/^class\s/.test(lines[j])) {
+            break;
+          }
+          const modelMatch = lines[j].match(/^\s+model\s*=\s*(\w+)/);
+          if (modelMatch) {
+            modelName = modelMatch[1];
+            break;
+          }
+        }
+
+        forms.push({ name: match[1], lineNumber: i, modelName });
+      }
+    } catch (error) {
+      reportError('Error al analizar formularios', error);
+    }
+
+    return forms;
+  }
+
+  /**
+   * Extrae las señales de un archivo signals.py: funciones decoradas con
+   * `@receiver(...)` y señales personalizadas declaradas como `NOMBRE = Signal(...)`.
+   */
+  async extractSignals(signalsPath: string): Promise<DjangoSignal[]> {
+    const signals: DjangoSignal[] = [];
+
+    try {
+      const content = this.stripComments(await readFile(signalsPath, 'utf8'));
+      const lines = content.split('\n');
+      const defRegex = /^(?:async\s+)?def\s+(\w+)\s*\(/;
+      const signalDeclRegex = /^(\w+)\s*=\s*Signal\s*\(/;
+      let pendingReceiver = false;
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+
+        if (/^@receiver\b/.test(line)) {
+          pendingReceiver = true;
+          continue;
+        }
+        if (/^@/.test(line)) {
+          // Otro decorador apilado: no rompe la cadena hacia el def.
+          continue;
+        }
+
+        const defMatch = line.match(defRegex);
+        if (defMatch) {
+          if (pendingReceiver) {
+            signals.push({ name: defMatch[1], lineNumber: i, kind: 'receiver' });
+          }
+          pendingReceiver = false;
+          continue;
+        }
+
+        const signalMatch = line.match(signalDeclRegex);
+        if (signalMatch) {
+          signals.push({ name: signalMatch[1], lineNumber: i, kind: 'signal' });
+        }
+
+        if (line !== '') {
+          pendingReceiver = false;
+        }
+      }
+    } catch (error) {
+      reportError('Error al analizar señales', error);
+    }
+
+    return signals;
+  }
+
+  /**
+   * Extrae las tareas de Celery de un archivo tasks.py: funciones decoradas con
+   * `@shared_task` o `@<app>.task` (`@app.task`, `@celery_app.task`…). No captura
+   * `@task` de django.tasks (eso lo hace extractTasks).
+   */
+  async extractCeleryTasks(tasksPath: string): Promise<DjangoCeleryTask[]> {
+    const tasks: DjangoCeleryTask[] = [];
+
+    try {
+      const content = this.stripComments(await readFile(tasksPath, 'utf8'));
+      const lines = content.split('\n');
+      const decoratorRegex = /^@(?:shared_task|\w+\.task)\b/;
+      const defRegex = /^(?:async\s+)?def\s+(\w+)\s*\(/;
+      let pending = false;
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+
+        if (decoratorRegex.test(line)) {
+          pending = true;
+          continue;
+        }
+        if (/^@/.test(line)) {
+          continue;
+        }
+
+        const defMatch = line.match(defRegex);
+        if (defMatch) {
+          if (pending) {
+            tasks.push({ name: defMatch[1], lineNumber: i });
+          }
+          pending = false;
+          continue;
+        }
+
+        if (line !== '') {
+          pending = false;
+        }
+      }
+    } catch (error) {
+      reportError('Error al analizar tareas de Celery', error);
+    }
+
+    return tasks;
+  }
+
+  /**
+   * Lista los comandos de gestión de una app (management/commands/<nombre>.py).
+   * El nombre del comando es el del fichero, sin extensión, igual que en Django.
+   */
+  async findManagementCommands(appPath: string): Promise<DjangoCommand[]> {
+    const commands: DjangoCommand[] = [];
+    const commandsDir = path.join(appPath, 'management', 'commands');
+
+    try {
+      const entries = await readdir(commandsDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (
+          entry.isFile() &&
+          entry.name.endsWith('.py') &&
+          entry.name !== '__init__.py'
+        ) {
+          commands.push({
+            name: entry.name.slice(0, -3),
+            filePath: path.join(commandsDir, entry.name)
+          });
+        }
+      }
+    } catch {
+      // El directorio puede no existir: no es un error, simplemente no hay comandos.
+    }
+
+    return commands;
   }
 
   /**

@@ -338,4 +338,42 @@ describe('DjangoProjectAnalyzer — red de seguridad de parsing (Fase 4)', () =>
       });
     });
   });
+
+  // Estructura adicional: forms, signals, comandos de gestión y tareas de Celery.
+  describe('Estructura adicional', () => {
+    it('extractForms detecta Form/ModelForm y asocia el modelo del Meta', async () => {
+      const forms = await analyzer.extractForms(path.join(FIXTURES_REST, 'forms.py'));
+      const names = forms.map(f => f.name);
+      assert.ok(names.includes('ArticleForm'), 'falta ArticleForm');
+      assert.ok(names.includes('ContactForm'), 'falta ContactForm');
+      assert.ok(!names.includes('NoEsForm'), 'no debe capturar una clase que no es form');
+      assert.strictEqual(forms.find(f => f.name === 'ArticleForm')?.modelName, 'Article');
+    });
+
+    it('extractSignals detecta receivers y señales personalizadas', async () => {
+      const signals = await analyzer.extractSignals(path.join(FIXTURES_REST, 'signals.py'));
+      const receiver = signals.find(s => s.name === 'on_article_saved');
+      assert.strictEqual(receiver?.kind, 'receiver', 'on_article_saved debe ser un receiver');
+      const custom = signals.find(s => s.name === 'article_published');
+      assert.strictEqual(custom?.kind, 'signal', 'article_published debe ser una señal');
+      assert.ok(!signals.some(s => s.name === 'funcion_normal'), 'no debe capturar una función sin @receiver');
+    });
+
+    it('findManagementCommands lista los comandos por nombre de fichero (sin __init__)', async () => {
+      const commands = await analyzer.findManagementCommands(FIXTURES_REST);
+      const names = commands.map(c => c.name);
+      assert.ok(names.includes('import_articles'), 'falta el comando import_articles');
+      assert.ok(!names.includes('__init__'), 'no debe listar __init__.py');
+    });
+
+    it('extractCeleryTasks detecta @shared_task y @app.task, no @task de Django', async () => {
+      const tasks = await analyzer.extractCeleryTasks(path.join(FIXTURES_CELERY, 'tasks.py'));
+      const names = tasks.map(t => t.name);
+      assert.ok(names.includes('enviar_correo'), 'falta la tarea @shared_task');
+      assert.ok(names.includes('otra_tarea_celery'), 'falta la tarea @app.task');
+      // Y a la inversa: las tareas de Django no deben colarse como Celery.
+      const djangoAsCelery = await analyzer.extractCeleryTasks(path.join(FIXTURES_DJ6, 'tasks.py'));
+      assert.strictEqual(djangoAsCelery.length, 0, '@task de django.tasks no es una tarea de Celery');
+    });
+  });
 });
