@@ -125,7 +125,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
 
     // Las ramas restantes requieren un resourceUri asociado.
     // Guardamos contra resourceUri ausente en lugar de usar aserciones non-null.
-    const uriContexts = ['app', 'models', 'views', 'urls', 'admin', 'main-urls', 'settings', 'tasks', 'partials', 'serializers', 'schemas', 'api'];
+    const uriContexts = ['app', 'models', 'views', 'urls', 'admin', 'main-urls', 'settings', 'tasks', 'partials', 'serializers', 'schemas', 'api', 'forms', 'signals', 'commands', 'celery-tasks'];
     if (uriContexts.includes(element.contextValue ?? '')) {
       if (!element.resourceUri) {
         return [];
@@ -155,6 +155,14 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
           return this.getSchemas(fsPath);
         case 'api':
           return this.getApiEndpoints(element);
+        case 'forms':
+          return this.getForms(fsPath);
+        case 'signals':
+          return this.getSignals(fsPath);
+        case 'commands':
+          return this.getCommands(element);
+        case 'celery-tasks':
+          return this.getCeleryTasks(fsPath);
       }
     }
 
@@ -400,6 +408,78 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       items.push(apiItem);
     }
 
+    // Forms (forms.py)
+    const formsPath = path.join(appPath, 'forms.py');
+    if (await pathExists(formsPath)) {
+      const formsItem = new DjangoTreeItem(
+        'Forms',
+        vscode.TreeItemCollapsibleState.Collapsed,
+        {
+          command: 'djangoStructureExplorer.openFile',
+          title: 'Open Forms',
+          arguments: [formsPath]
+        },
+        vscode.Uri.file(formsPath),
+        'forms'
+      );
+      formsItem.iconPath = new vscode.ThemeIcon('symbol-structure');
+      items.push(formsItem);
+    }
+
+    // Signals (signals.py)
+    const signalsPath = path.join(appPath, 'signals.py');
+    if (await pathExists(signalsPath)) {
+      const signalsItem = new DjangoTreeItem(
+        'Signals',
+        vscode.TreeItemCollapsibleState.Collapsed,
+        {
+          command: 'djangoStructureExplorer.openFile',
+          title: 'Open Signals',
+          arguments: [signalsPath]
+        },
+        vscode.Uri.file(signalsPath),
+        'signals'
+      );
+      signalsItem.iconPath = new vscode.ThemeIcon('broadcast');
+      items.push(signalsItem);
+    }
+
+    // Management commands (management/commands/*.py)
+    const commands = await this.analyzer.findManagementCommands(appPath);
+    if (commands.length > 0) {
+      const commandsItem = new DjangoTreeItem(
+        'Commands',
+        vscode.TreeItemCollapsibleState.Collapsed,
+        undefined,
+        vscode.Uri.file(path.join(appPath, 'management', 'commands')),
+        'commands'
+      );
+      commandsItem.iconPath = new vscode.ThemeIcon('terminal');
+      items.push(commandsItem);
+    }
+
+    // Celery tasks (tasks.py con @shared_task / @app.task), nodo aparte de las
+    // Tasks de Django 6. Solo se añade si hay alguna tarea de Celery.
+    const tasksPathForCelery = path.join(appPath, 'tasks.py');
+    if (await pathExists(tasksPathForCelery)) {
+      const celeryTasks = await this.analyzer.extractCeleryTasks(tasksPathForCelery);
+      if (celeryTasks.length > 0) {
+        const celeryItem = new DjangoTreeItem(
+          'Celery Tasks',
+          vscode.TreeItemCollapsibleState.Collapsed,
+          {
+            command: 'djangoStructureExplorer.openFile',
+            title: 'Open Celery Tasks',
+            arguments: [tasksPathForCelery]
+          },
+          vscode.Uri.file(tasksPathForCelery),
+          'celery-tasks'
+        );
+        celeryItem.iconPath = new vscode.ThemeIcon('rocket');
+        items.push(celeryItem);
+      }
+    }
+
     return items;
   }
 
@@ -544,6 +624,100 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       );
       item.description = `${endpoint.framework} · ${endpoint.handler}`;
       item.iconPath = new vscode.ThemeIcon('symbol-event');
+      return item;
+    });
+
+    return this.sortItems(items);
+  }
+
+  private async getForms(formsPath: string): Promise<DjangoTreeItem[]> {
+    const forms = await this.analyzer.extractForms(formsPath);
+    const items = forms.map(form => {
+      const item = new DjangoTreeItem(
+        form.name,
+        vscode.TreeItemCollapsibleState.None,
+        {
+          command: 'djangoStructureExplorer.openFile',
+          title: 'Open Form',
+          arguments: [formsPath, form.lineNumber]
+        },
+        vscode.Uri.file(formsPath),
+        'form'
+      );
+      item.iconPath = new vscode.ThemeIcon('symbol-structure');
+      if (form.modelName) {
+        item.description = form.modelName;
+      }
+      return item;
+    });
+
+    return this.sortItems(items);
+  }
+
+  private async getSignals(signalsPath: string): Promise<DjangoTreeItem[]> {
+    const signals = await this.analyzer.extractSignals(signalsPath);
+    const items = signals.map(signal => {
+      const item = new DjangoTreeItem(
+        signal.name,
+        vscode.TreeItemCollapsibleState.None,
+        {
+          command: 'djangoStructureExplorer.openFile',
+          title: 'Open Signal',
+          arguments: [signalsPath, signal.lineNumber]
+        },
+        vscode.Uri.file(signalsPath),
+        'signal'
+      );
+      item.description = signal.kind === 'receiver' ? 'receiver' : 'Signal';
+      item.iconPath = new vscode.ThemeIcon(signal.kind === 'receiver' ? 'symbol-method' : 'broadcast');
+      return item;
+    });
+
+    return this.sortItems(items);
+  }
+
+  private async getCommands(element: DjangoTreeItem): Promise<DjangoTreeItem[]> {
+    if (!element.resourceUri) {
+      return [];
+    }
+    // resourceUri apunta a management/commands; la app es dos niveles arriba.
+    const appPath = path.dirname(path.dirname(element.resourceUri.fsPath));
+    const commands = await this.analyzer.findManagementCommands(appPath);
+
+    const items = commands.map(command => {
+      const item = new DjangoTreeItem(
+        command.name,
+        vscode.TreeItemCollapsibleState.None,
+        {
+          command: 'djangoStructureExplorer.openFile',
+          title: 'Open Command',
+          arguments: [command.filePath]
+        },
+        vscode.Uri.file(command.filePath),
+        'command'
+      );
+      item.iconPath = new vscode.ThemeIcon('terminal');
+      return item;
+    });
+
+    return this.sortItems(items);
+  }
+
+  private async getCeleryTasks(tasksPath: string): Promise<DjangoTreeItem[]> {
+    const tasks = await this.analyzer.extractCeleryTasks(tasksPath);
+    const items = tasks.map(task => {
+      const item = new DjangoTreeItem(
+        task.name,
+        vscode.TreeItemCollapsibleState.None,
+        {
+          command: 'djangoStructureExplorer.openFile',
+          title: 'Open Celery Task',
+          arguments: [tasksPath, task.lineNumber]
+        },
+        vscode.Uri.file(tasksPath),
+        'celery-task'
+      );
+      item.iconPath = new vscode.ThemeIcon('rocket');
       return item;
     });
 

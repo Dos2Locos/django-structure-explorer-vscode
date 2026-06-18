@@ -18,6 +18,10 @@ A Visual Studio Code extension that provides a PyCharm-like Django project struc
 - **DRF Serializers**: Lists serializers from `serializers.py`, with the associated model when declared
 - **DRF / django-ninja API**: Per-app "API" node with django-ninja operations (`@api/@router.get/post/...`) and DRF decorator endpoints (`@api_view`, `@action`); ViewSets/APIView are also flagged in the Views node
 - **django-ninja Schemas**: Lists `Schema` / `ModelSchema` classes from `schemas.py`
+- **Forms**: Lists `Form` / `ModelForm` classes from `forms.py`, with the associated model
+- **Signals**: Lists `@receiver` handlers and custom `Signal()` declarations from `signals.py`
+- **Management Commands**: Lists custom `manage.py` commands from `management/commands/`
+- **Celery Tasks**: Detects `@shared_task` / `@app.task` in `tasks.py` (separate from Django 6 Tasks)
 
 ## Why Use Django Structure Explorer?
 
