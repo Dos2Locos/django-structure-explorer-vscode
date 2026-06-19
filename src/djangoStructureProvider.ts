@@ -839,9 +839,10 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
         {
           command: 'djangoStructureExplorer.openFile',
           title: 'Open URL',
-          arguments: [urlsPath, url.lineNumber]
+          // url.filePath puede diferir de urlsPath si la ruta viene de un include().
+          arguments: [url.filePath, url.lineNumber]
         },
-        vscode.Uri.file(urlsPath),
+        vscode.Uri.file(url.filePath),
         'url'
       );
       urlItem.description = url.viewName;

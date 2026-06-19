@@ -248,6 +248,8 @@ describe('DjangoProjectAnalyzer — red de seguridad de parsing (Fase 4)', () =>
       const leaf = urls.find(u => u.viewName === 'views.b_list');
       assert.ok(leaf, 'falta la ruta hoja incluida desde b.urls');
       assert.strictEqual(leaf!.pattern, 'b/lista/', 'la ruta incluida debe llevar el prefijo del path() externo');
+      // Porta el fix de #3: una URL incluida apunta a SU fichero, no al de cabecera.
+      assert.ok(leaf!.filePath.endsWith(path.join('b', 'urls.py')), 'la URL incluida debe apuntar a su propio urls.py');
     });
   });
 

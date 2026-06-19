@@ -59,6 +59,9 @@ export interface DjangoUrl {
   pattern: string;
   viewName: string;
   lineNumber: number;
+  // Fichero donde se declara esta URL. Difiere de la urls.py de cabecera cuando
+  // la ruta procede de un include(): así la navegación abre el fichero correcto.
+  filePath: string;
 }
 
 export interface DjangoAdminClass {
@@ -167,7 +170,9 @@ export class DjangoProjectAnalyzer {
     const dirs = await this.getDirectories(projectRoot);
     for (const dir of dirs) {
       const urlsPath = path.join(dir, 'urls.py');
-      if (await pathExists(urlsPath)) {
+      // El urls.py raíz vive en el paquete de configuración, junto a settings.py;
+      // así se evita devolver el urls.py de la primera app en orden alfabético.
+      if (await pathExists(urlsPath) && await pathExists(path.join(dir, 'settings.py'))) {
         // Verificar si es el urls.py principal (contiene ROOT_URLCONF o urlpatterns)
         const content = await readFile(urlsPath, 'utf8');
         if (content.includes('ROOT_URLCONF') || content.includes('urlpatterns')) {
@@ -530,7 +535,8 @@ export class DjangoProjectAnalyzer {
             urls.push({
               pattern: prefix + this.stringLiteralValue(patternNode),
               viewName: dottedName(viewNode),
-              lineNumber: call.startPosition.row
+              lineNumber: call.startPosition.row,
+              filePath: urlsPath
             });
           }
           continue;
@@ -545,7 +551,8 @@ export class DjangoProjectAnalyzer {
             urls.push({
               pattern: prefix + this.stringLiteralValue(patternNode),
               viewName: dottedName(viewNode),
-              lineNumber: call.startPosition.row
+              lineNumber: call.startPosition.row,
+              filePath: urlsPath
             });
           }
         }

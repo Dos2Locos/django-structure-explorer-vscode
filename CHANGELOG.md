@@ -26,6 +26,10 @@ y el proyecto se adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 - El parser ya no se rompe con imports que contienen metacaracteres de regex ni
   con valores de settings multilínea (heredado de la robustez previa, ahora
   garantizado por el AST).
+- `findMainUrlsFile` ya no devuelve el `urls.py` de la primera app en orden
+  alfabético: exige que el directorio contenga también `settings.py` (el paquete
+  de configuración). Al pinchar una URL traída por `include()` se abre su fichero
+  real, no el `urls.py` de cabecera. _(Porta el arreglo de @mvanorder, PR #3.)_
 
 ### Interno
 - Se registra el stacktrace completo en `reportError` y en `getChildren` para
