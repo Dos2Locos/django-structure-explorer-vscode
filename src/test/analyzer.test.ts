@@ -14,6 +14,7 @@ const FIXTURES_CELERY = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixt
 const FIXTURES_REST = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'restapp');
 const FIXTURES_NAV = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'navproj');
 const FIXTURES_DECORATED = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'decoratedapp');
+const FIXTURES_SPLIT = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'splitsettings');
 const FIXTURES_NESTED = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'nestedproj');
 const FIXTURES_DEEP = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'deepproj');
 const FIXTURES_IGNORED_ROOT = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'ignoredroot');
@@ -433,6 +434,26 @@ describe('DjangoProjectAnalyzer — red de seguridad de parsing (Fase 4)', () =>
       const views = await analyzer.extractViews(path.join(FIXTURES_REST, 'views.py'));
       const stats = views.find(v => v.name === 'stats');
       assert.deepStrictEqual(stats?.decorators, ['api_view']);
+    });
+  });
+
+  // findMainUrlsFile debe reconocer el paquete de configuración aunque use un
+  // paquete de settings dividido (config/settings/base.py), no solo settings.py.
+  describe('findMainUrlsFile — paquetes de settings divididos', () => {
+    it('devuelve el urls.py del paquete config con settings/ dividido', async () => {
+      const local = new DjangoProjectAnalyzer();
+      const mainUrls = await local.findMainUrlsFile(FIXTURES_SPLIT);
+      assert.ok(mainUrls, 'debe encontrar el urls.py raíz pese a no haber settings.py plano');
+      assert.ok(
+        mainUrls!.replace(/\\/g, '/').endsWith('splitsettings/config/urls.py'),
+        'debe devolver config/urls.py, no el urls.py de la app'
+      );
+    });
+
+    it('no devuelve el urls.py de una app sin paquete de configuración', async () => {
+      const local = new DjangoProjectAnalyzer();
+      const mainUrls = await local.findMainUrlsFile(FIXTURES_SPLIT);
+      assert.ok(!mainUrls!.replace(/\\/g, '/').includes('blogapp'), 'blogapp/urls.py no es la raíz');
     });
   });
 

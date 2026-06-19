@@ -19,6 +19,12 @@ y el proyecto se adhiere a [Versionado Semántico](https://semver.org/lang/es/).
   inequívocos (sin globs, rutas anidadas ni negaciones). _(Idea de la PR #2 de
   @0x3at.)_
 
+### Corregido
+- `findMainUrlsFile` reconoce ahora los proyectos con **paquete de settings
+  dividido** (`config/settings/base.py`, `config/settings/prod.py`…): el nodo
+  Configuration > URLs ya no desaparece cuando no existe un `settings.py` plano
+  junto al `urls.py` raíz. _(Detectado en la revisión de Codex sobre la PR #9.)_
+
 ### Interno
 - Unificada la lista de directorios excluidos del escaneo en una única constante
   (`DEFAULT_EXCLUDED_DIRS`), eliminando la duplicación entre `getDirectories` y

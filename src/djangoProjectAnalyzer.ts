@@ -238,15 +238,43 @@ export class DjangoProjectAnalyzer {
   }
 
   /**
+   * Indica si `dir` es el paquete de configuración del proyecto: contiene un
+   * `settings.py` plano o un paquete de settings dividido `settings/` (con al
+   * menos un módulo `.py`, p. ej. `config/settings/base.py`). Sirve para
+   * distinguir el `urls.py` raíz del de una app cualquiera.
+   */
+  private async isConfigPackage(dir: string): Promise<boolean> {
+    // Layout clásico: config/settings.py junto al urls.py raíz.
+    if (await pathExists(path.join(dir, 'settings.py'))) {
+      return true;
+    }
+    // Layout dividido: config/settings/{__init__,base,prod}.py (paquete o
+    // namespace package). Se acepta si la carpeta contiene algún módulo Python.
+    const settingsDir = path.join(dir, 'settings');
+    try {
+      const stat = await fs.promises.stat(settingsDir);
+      if (!stat.isDirectory()) {
+        return false;
+      }
+      const entries = await readdir(settingsDir, { withFileTypes: true });
+      return entries.some(entry => entry.isFile() && entry.name.endsWith('.py'));
+    } catch {
+      // settings/ no existe o no es accesible: no es el paquete de configuración.
+      return false;
+    }
+  }
+
+  /**
    * Busca el archivo urls.py principal del proyecto
    */
   async findMainUrlsFile(projectRoot: string): Promise<string | undefined> {
     const dirs = await this.getDirectories(projectRoot);
     for (const dir of dirs) {
       const urlsPath = path.join(dir, 'urls.py');
-      // El urls.py raíz vive en el paquete de configuración, junto a settings.py;
-      // así se evita devolver el urls.py de la primera app en orden alfabético.
-      if (await pathExists(urlsPath) && await pathExists(path.join(dir, 'settings.py'))) {
+      // El urls.py raíz vive en el paquete de configuración (junto a settings.py
+      // o a un paquete settings/ dividido); así se evita devolver el urls.py de
+      // la primera app en orden alfabético.
+      if (await pathExists(urlsPath) && await this.isConfigPackage(dir)) {
         // Verificar si es el urls.py principal (contiene ROOT_URLCONF o urlpatterns)
         const content = await readFile(urlsPath, 'utf8');
         if (content.includes('ROOT_URLCONF') || content.includes('urlpatterns')) {
