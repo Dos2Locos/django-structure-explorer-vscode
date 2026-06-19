@@ -26,7 +26,9 @@ async function pathExists(targetPath: string): Promise<boolean> {
  */
 function reportError(context: string, error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
-  console.error(`${context}: ${message}`);
+  // Registrar el objeto error completo (incluye `stack`): así el stacktrace
+  // aparece expandible en la consola de Developer Tools, no solo el mensaje.
+  console.error(`${context}:`, error);
   vscode.window.showErrorMessage(`Django Structure Explorer: ${context}. ${message}`);
 }
 
