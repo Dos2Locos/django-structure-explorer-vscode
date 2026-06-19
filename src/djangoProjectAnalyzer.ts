@@ -907,20 +907,29 @@ export class DjangoProjectAnalyzer {
     const tasks: DjangoTask[] = [];
 
     try {
-      const content = this.stripComments(await readFile(tasksPath, 'utf8'));
-      const lines = content.split('\n');
+      await initPythonParser();
+      const content = await readFile(tasksPath, 'utf8');
+      const root = parsePython(content).rootNode;
 
       // Nombres de decorador que corresponden a django.tasks.task (con o sin alias).
       const taskDecorators = new Set<string>();
-      for (const raw of lines) {
-        const importMatch = raw.trim().match(/^from\s+django\.tasks\s+import\s+(.+)$/);
-        if (importMatch) {
-          importMatch[1].split(',').forEach(part => {
-            const aliasMatch = part.trim().match(/^task(?:\s+as\s+(\w+))?$/);
-            if (aliasMatch) {
-              taskDecorators.add(aliasMatch[1] || 'task');
+      for (const imp of root.namedChildren) {
+        if (imp.type !== 'import_from_statement') {
+          continue;
+        }
+        if (imp.childForFieldName('module_name')?.text !== 'django.tasks') {
+          continue;
+        }
+        for (const child of imp.namedChildren) {
+          if (child.type === 'dotted_name' && child.text === 'task') {
+            taskDecorators.add('task');
+          } else if (child.type === 'aliased_import') {
+            const original = child.childForFieldName('name')?.text;
+            const alias = child.childForFieldName('alias')?.text;
+            if (original === 'task' && alias) {
+              taskDecorators.add(alias);
             }
-          });
+          }
         }
       }
 
@@ -929,35 +938,23 @@ export class DjangoProjectAnalyzer {
         return tasks;
       }
 
-      const decoratorRegex = /^@(\w+)\b/;
-      const defRegex = /^(?:async\s+)?def\s+(\w+)\s*\(/;
-      let pending = false;
-
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-
-        const decoratorMatch = line.match(decoratorRegex);
-        if (decoratorMatch) {
-          // Los decoradores pueden apilarse (@task + @otro): basta con que uno
-          // sea de django.tasks para marcar la siguiente función como tarea.
-          if (taskDecorators.has(decoratorMatch[1])) {
-            pending = true;
-          }
+      // Funciones decoradas con @task (o su alias): basta con que UNO de los
+      // decoradores apilados sea de django.tasks. Los `@task(...)` con argumentos
+      // también valen (el AST los representa como `call`).
+      for (const node of root.namedChildren) {
+        if (node.type !== 'decorated_definition') {
           continue;
         }
-
-        const defMatch = line.match(defRegex);
-        if (defMatch) {
-          if (pending) {
-            tasks.push({ name: defMatch[1], lineNumber: i });
-          }
-          pending = false;
+        const def = node.childForFieldName('definition');
+        if (!def || def.type !== 'function_definition') {
           continue;
         }
-
-        // Cualquier otra línea no vacía rompe la cadena decorador→def.
-        if (line !== '') {
-          pending = false;
+        const isTask = node.namedChildren.some(
+          c => c.type === 'decorator' && taskDecorators.has(this.decoratorName(c) ?? '')
+        );
+        const nameNode = def.childForFieldName('name');
+        if (isTask && nameNode) {
+          tasks.push({ name: nameNode.text, lineNumber: nameNode.startPosition.row });
         }
       }
     } catch (error) {
