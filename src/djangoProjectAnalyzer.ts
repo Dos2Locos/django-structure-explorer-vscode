@@ -21,15 +21,6 @@ async function pathExists(targetPath: string): Promise<boolean> {
 }
 
 /**
- * Escapa los metacaracteres de una cadena para incrustarla con seguridad dentro
- * de un patrón RegExp. Sin esto, un import malformado (p. ej. con paréntesis)
- * podría romper `new RegExp(...)` y dejar el parseo de campos vacío en silencio.
- */
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/**
  * Registra un error y lo notifica al usuario, en lugar de tragárselo en silencio.
  * Así se distingue "no hay resultados" de "el parseo falló".
  */
@@ -149,96 +140,6 @@ export interface DjangoLocation {
 }
 
 export class DjangoProjectAnalyzer {
-
-  /**
-   * Neutraliza los comentarios del contenido para que el análisis por regex no
-   * detecte símbolos dentro de código comentado. Reemplaza por espacios:
-   *  - comentarios de línea (`#` fuera de cadenas), hasta el fin de línea
-   *  - el INTERIOR de bloques de triple comilla (`"""` / `'''`), conservando
-   *    los delimitadores de apertura y cierre
-   *
-   * Conserva la longitud del texto y las posiciones de `\n`, de modo que los
-   * números de línea y los offsets siguen siendo válidos para todos los
-   * extractores (tanto los que iteran `split('\n')` como `extractAdminClasses`,
-   * que calcula la línea con `content.substring(0, index)`).
-   *
-   * Las cadenas normales de una sola línea se conservan intactas: son valores
-   * que el parser necesita (patrones de URL, valores de settings…); solo se
-   * evita interpretar una `#` dentro de ellas como comentario.
-   */
-  private stripComments(content: string): string {
-    const chars = content.split('');
-    const n = chars.length;
-    let inLineComment = false;
-    let single: '"' | "'" | null = null; // cadena de una línea
-    let triple: '"' | "'" | null = null; // bloque de triple comilla
-
-    const blank = (idx: number): void => {
-      if (chars[idx] !== '\n' && chars[idx] !== '\r') {
-        chars[idx] = ' ';
-      }
-    };
-
-    let i = 0;
-    while (i < n) {
-      const c = chars[i];
-
-      if (inLineComment) {
-        if (c === '\n') {
-          inLineComment = false;
-        } else {
-          blank(i);
-        }
-        i++;
-        continue;
-      }
-
-      if (triple) {
-        // ¿Cierre del bloque triple? Conservar los 3 delimitadores.
-        if (c === triple && chars[i + 1] === triple && chars[i + 2] === triple) {
-          triple = null;
-          i += 3;
-          continue;
-        }
-        blank(i);
-        i++;
-        continue;
-      }
-
-      if (single) {
-        if (c === '\\') {
-          i += 2; // saltar el carácter escapado
-          continue;
-        }
-        if (c === single || c === '\n') {
-          single = null; // fin de cadena (las cadenas de una línea no cruzan '\n')
-        }
-        i++;
-        continue;
-      }
-
-      // Fuera de cualquier cadena o comentario
-      if (c === '#') {
-        inLineComment = true;
-        blank(i);
-        i++;
-        continue;
-      }
-      if (c === '"' || c === "'") {
-        if (chars[i + 1] === c && chars[i + 2] === c) {
-          triple = c; // entrar al bloque triple, conservando el delimitador
-          i += 3;
-          continue;
-        }
-        single = c;
-        i++;
-        continue;
-      }
-      i++;
-    }
-
-    return chars.join('');
-  }
 
   /**
    * Busca todos los archivos settings.py en el proyecto
@@ -589,17 +490,6 @@ export class DjangoProjectAnalyzer {
       };
       collect(root);
 
-      // Argumentos posicionales de una llamada (descartando keyword= y comentarios).
-      const positionalArgs = (call: SyntaxNode): SyntaxNode[] => {
-        const args = call.childForFieldName('arguments');
-        if (!args) {
-          return [];
-        }
-        return args.namedChildren.filter(
-          a => a.type !== 'keyword_argument' && a.type !== 'comment'
-        );
-      };
-
       // Nombre punteado de una vista: `views.home` tal cual; para una CBV
       // `views.AboutView.as_view()` se usa el objeto de la llamada.
       const dottedName = (node: SyntaxNode): string =>
@@ -614,7 +504,7 @@ export class DjangoProjectAnalyzer {
 
         // path()/re_path()/url(): primer argumento string = patrón, segundo = vista.
         if (fnName === 'path' || fnName === 're_path' || fnName === 'url') {
-          const pos = positionalArgs(call);
+          const pos = this.positionalArgs(call);
           const patternNode = pos[0];
           if (!patternNode || patternNode.type !== 'string') {
             continue;
@@ -627,7 +517,7 @@ export class DjangoProjectAnalyzer {
             viewNode.type === 'call' &&
             finalSegment(viewNode.childForFieldName('function')?.text ?? '') === 'include'
           ) {
-            await this.resolveInclude(viewNode, urlsPath, prefix, visited, urls, positionalArgs);
+            await this.resolveInclude(viewNode, urlsPath, prefix, visited, urls);
             continue;
           }
 
@@ -643,7 +533,7 @@ export class DjangoProjectAnalyzer {
 
         // Routers DRF: router.register(r'prefix', SomeViewSet[, ...]) (caso #12).
         if (fnName === 'register' && fn.type === 'attribute') {
-          const pos = positionalArgs(call);
+          const pos = this.positionalArgs(call);
           const patternNode = pos[0];
           const viewNode = pos[1];
           if (patternNode && patternNode.type === 'string' && viewNode) {
@@ -673,10 +563,9 @@ export class DjangoProjectAnalyzer {
     urlsPath: string,
     prefix: string,
     visited: Set<string>,
-    urls: DjangoUrl[],
-    positionalArgs: (call: SyntaxNode) => SyntaxNode[]
+    urls: DjangoUrl[]
   ): Promise<void> {
-    const inclPos = positionalArgs(includeCall);
+    const inclPos = this.positionalArgs(includeCall);
     const moduleNode = inclPos[0];
     if (!moduleNode || moduleNode.type !== 'string') {
       return;
@@ -1487,16 +1376,35 @@ export class DjangoProjectAnalyzer {
     if (!segment) {
       return undefined;
     }
-    const nameRegex = new RegExp(`name\\s*=\\s*['"]${escapeRegExp(segment)}['"]`);
     const urlsFiles = await this.findProjectFiles(projectRoot, 'urls.py');
+    await initPythonParser();
+
+    // Localiza el argumento `name='<segment>'` de un path()/re_path()/url() en el
+    // AST. El recorrido ignora comentarios de forma natural.
+    const findName = (node: SyntaxNode): SyntaxNode | undefined => {
+      if (
+        node.type === 'keyword_argument' &&
+        node.childForFieldName('name')?.text === 'name'
+      ) {
+        const value = node.childForFieldName('value');
+        if (value && value.type === 'string' && this.stringLiteralValue(value) === segment) {
+          return node;
+        }
+      }
+      for (const child of node.namedChildren) {
+        const found = findName(child);
+        if (found) {
+          return found;
+        }
+      }
+      return undefined;
+    };
 
     for (const file of urlsFiles) {
-      const content = this.stripComments(await readFile(file, 'utf8'));
-      const lines = content.split('\n');
-      for (let i = 0; i < lines.length; i++) {
-        if (nameRegex.test(lines[i])) {
-          return { filePath: file, lineNumber: i };
-        }
+      const root = parsePython(await readFile(file, 'utf8')).rootNode;
+      const match = findName(root);
+      if (match) {
+        return { filePath: file, lineNumber: match.startPosition.row };
       }
     }
     return undefined;
@@ -1525,16 +1433,33 @@ export class DjangoProjectAnalyzer {
     if (!modelName) {
       return undefined;
     }
-    const classRegex = new RegExp(`^class\\s+${escapeRegExp(modelName)}\\s*\\(`);
     const modelsFiles = await this.findProjectFiles(projectRoot, 'models.py');
+    await initPythonParser();
+
+    // Localiza `class <modelName>(...)` en el AST (con clase base, como exigía el
+    // regex original). El recorrido cubre clases anidadas e ignora comentarios.
+    const findClass = (node: SyntaxNode): SyntaxNode | undefined => {
+      if (
+        node.type === 'class_definition' &&
+        node.childForFieldName('name')?.text === modelName &&
+        node.childForFieldName('superclasses')
+      ) {
+        return node.childForFieldName('name') ?? node;
+      }
+      for (const child of node.namedChildren) {
+        const found = findClass(child);
+        if (found) {
+          return found;
+        }
+      }
+      return undefined;
+    };
 
     for (const file of modelsFiles) {
-      const content = this.stripComments(await readFile(file, 'utf8'));
-      const lines = content.split('\n');
-      for (let i = 0; i < lines.length; i++) {
-        if (classRegex.test(lines[i].trim())) {
-          return { filePath: file, lineNumber: i };
-        }
+      const root = parsePython(await readFile(file, 'utf8')).rootNode;
+      const match = findClass(root);
+      if (match) {
+        return { filePath: file, lineNumber: match.startPosition.row };
       }
     }
     return undefined;
