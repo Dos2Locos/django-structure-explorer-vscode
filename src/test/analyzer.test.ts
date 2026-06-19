@@ -528,6 +528,32 @@ describe('DjangoProjectAnalyzer — red de seguridad de parsing (Fase 4)', () =>
       assert.ok(!names.includes('secret_app'), 'secret_app/ está en .gitignore y debe excluirse');
     });
 
+    it('fusiona el .gitignore de la raíz del workspace con la del proyecto anidado', async () => {
+      // Monorepo: .gitignore en la raíz del workspace, manage.py + apps en backend/.
+      const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'dse-monorepo-'));
+      try {
+        fs.writeFileSync(path.join(ws, '.gitignore'), 'secret_app/\n');
+        const backend = path.join(ws, 'backend');
+        for (const app of ['realapp', 'secret_app']) {
+          const appDir = path.join(backend, app);
+          fs.mkdirSync(appDir, { recursive: true });
+          fs.writeFileSync(path.join(appDir, 'models.py'), 'from django.db import models\n');
+        }
+
+        const local = new DjangoProjectAnalyzer();
+        // El provider pasa [proyecto, raíz(es) del workspace]; aquí lo emulamos.
+        await local.loadIgnorePatterns([backend, ws]);
+        const names = (await local.findDjangoApps(backend)).map(a => path.basename(a));
+        assert.ok(names.includes('realapp'), 'la app real debe aparecer');
+        assert.ok(
+          !names.includes('secret_app'),
+          'la carpeta ignorada en el .gitignore de la raíz del workspace debe excluirse aun con proyecto anidado'
+        );
+      } finally {
+        fs.rmSync(ws, { recursive: true, force: true });
+      }
+    });
+
     it('loadIgnorePatterns es inocuo si el proyecto no tiene .gitignore', async () => {
       const local = new DjangoProjectAnalyzer();
       // FIXTURES_NAV no tiene .gitignore: no debe lanzar ni alterar la detección.

@@ -16,8 +16,10 @@ y el proyecto se adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 - **Exclusión de directorios según `.gitignore`.** Además de la lista por defecto
   de directorios pesados, el escaneo omite las carpetas declaradas en el
   `.gitignore` del proyecto. El parseo es conservador: solo nombres de directorio
-  inequívocos (sin globs, rutas anidadas ni negaciones). _(Idea de la PR #2 de
-  @0x3at.)_
+  inequívocos (sin globs, rutas anidadas ni negaciones). Se fusionan los
+  `.gitignore` de la raíz del workspace y del proyecto, de modo que en monorepos
+  con proyecto anidado (`manage.py` en `backend/`) se respeta el `.gitignore` de
+  la raíz del repositorio. _(Idea de la PR #2 de @0x3at.)_
 
 ### Corregido
 - `findMainUrlsFile` reconoce ahora los proyectos con **paquete de settings

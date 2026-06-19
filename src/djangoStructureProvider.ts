@@ -139,8 +139,15 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
     }
 
     // Afina el escaneo con los patrones del .gitignore antes de listar apps,
-    // settings o plantillas. Es idempotente por raíz, así que apenas cuesta.
-    await this.analyzer.loadIgnorePatterns(projectRoot);
+    // settings o plantillas. Se incluyen las raíces del workspace además de la
+    // del proyecto: en monorepos con proyecto anidado (manage.py en backend/) el
+    // .gitignore suele vivir en la raíz del workspace, no junto al proyecto.
+    // Es idempotente por conjunto de raíces, así que apenas cuesta.
+    const ignoreRoots = new Set<string>([projectRoot]);
+    for (const folder of vscode.workspace.workspaceFolders ?? []) {
+      ignoreRoots.add(folder.uri.fsPath);
+    }
+    await this.analyzer.loadIgnorePatterns([...ignoreRoots]);
 
     if (!element) {
       // Root level - show main project structure

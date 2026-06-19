@@ -158,27 +158,44 @@ export interface DjangoLocation {
 
 export class DjangoProjectAnalyzer {
 
-  /** Nombres de directorio a ignorar, derivados del .gitignore del proyecto. */
+  /** Nombres de directorio a ignorar, derivados de los .gitignore del proyecto. */
   private gitignoreDirs: Set<string> = new Set<string>();
-  /** Raíz para la que ya se cargó el .gitignore (evita relecturas en cada escaneo). */
+  /** Clave (conjunto de raíces) ya cargada, para evitar relecturas en cada escaneo. */
   private gitignoreLoadedFor?: string;
 
   /**
-   * Carga, una sola vez por raíz, los nombres de directorio declarados en el
-   * .gitignore del proyecto para sumarlos a la exclusión del escaneo. Es
+   * Carga, una sola vez por conjunto de raíces, los nombres de directorio
+   * declarados en los .gitignore del proyecto para sumarlos a la exclusión del
+   * escaneo. Se aceptan varias raíces porque en monorepos con proyecto anidado
+   * (p. ej. `manage.py` en `backend/`) el `.gitignore` suele vivir en la raíz
+   * del workspace, no junto al proyecto; se leen ambos y se fusionan. Es
    * conservador a propósito: solo considera entradas que nombran un directorio
    * de forma inequívoca (sin globs, sin separadores de ruta intermedios y sin
    * negaciones), de modo que la comparación por nombre no produzca falsos
-   * positivos. La ausencia o el fallo de lectura del fichero no es un error.
+   * positivos. La ausencia o el fallo de lectura de un fichero no es un error.
    */
-  async loadIgnorePatterns(projectRoot: string): Promise<void> {
-    if (this.gitignoreLoadedFor === projectRoot) {
+  async loadIgnorePatterns(roots: string | string[]): Promise<void> {
+    const rootList = (typeof roots === 'string' ? [roots] : roots).filter(Boolean);
+    // Clave estable e independiente del orden de las raíces.
+    const cacheKey = [...new Set(rootList)].sort().join('\0');
+    if (this.gitignoreLoadedFor === cacheKey) {
       return;
     }
-    this.gitignoreLoadedFor = projectRoot;
-    this.gitignoreDirs = new Set<string>();
+    this.gitignoreLoadedFor = cacheKey;
 
-    const gitignorePath = path.join(projectRoot, '.gitignore');
+    const dirs = new Set<string>();
+    for (const root of new Set(rootList)) {
+      await this.collectGitignoreDirs(root, dirs);
+    }
+    this.gitignoreDirs = dirs;
+  }
+
+  /**
+   * Lee el `.gitignore` de `root` (si existe) y vuelca en `target` los nombres
+   * de directorio inequívocos. No lanza: un fichero ausente o ilegible se ignora.
+   */
+  private async collectGitignoreDirs(root: string, target: Set<string>): Promise<void> {
+    const gitignorePath = path.join(root, '.gitignore');
     if (!(await pathExists(gitignorePath))) {
       return;
     }
@@ -197,12 +214,12 @@ export class DjangoProjectAnalyzer {
         if (!entry || entry.includes('/') || /[*?[\]]/.test(entry)) {
           continue;
         }
-        this.gitignoreDirs.add(entry);
+        target.add(entry);
       }
     } catch (error) {
       // Un .gitignore ilegible no debe romper el escaneo del proyecto.
       const message = error instanceof Error ? error.message : String(error);
-      console.error(`[DjangoStructureExplorer] No se pudo leer .gitignore en "${projectRoot}": ${message}`);
+      console.error(`[DjangoStructureExplorer] No se pudo leer .gitignore en "${root}": ${message}`);
     }
   }
 
