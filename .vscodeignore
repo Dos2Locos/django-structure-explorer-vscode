@@ -5,6 +5,12 @@ docs/**
 .gitignore
 .yarnrc
 vsc-extension-quickstart.md
+# Configuración local de herramientas y artefactos: nunca deben viajar en el
+# .vsix (pueden contener ajustes locales y solo añaden peso).
+.claude/**
+.ruff_cache/**
+.git/**
+**/*.vsix
 **/tsconfig.json
 **/.eslintrc.json
 **/*.map
