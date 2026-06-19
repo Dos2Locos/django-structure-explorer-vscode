@@ -73,8 +73,10 @@ export class DjangoOutlineProvider implements vscode.DocumentSymbolProvider {
         const urls = await this.analyzer.extractUrls(document.fileName);
         for (const url of urls) {
           if (token.isCancellationRequested) { break; }
+          // El patrón de la raíz del sitio es '' (path('')), pero DocumentSymbol
+          // rechaza un nombre vacío ("name must not be falsy"): usar '/' de respaldo.
           const urlSymbol = new vscode.DocumentSymbol(
-            url.pattern,
+            url.pattern || '/',
             url.viewName,
             vscode.SymbolKind.Variable,
             new vscode.Range(url.lineNumber, 0, url.lineNumber, 0),
