@@ -4,6 +4,7 @@ import { DjangoStructureProvider } from './djangoStructureProvider';
 import { DjangoTreeItem } from './djangoTreeItem';
 import { DjangoOutlineProvider } from './djangoOutlineProvider';
 import { DjangoDefinitionProvider } from './djangoDefinitionProvider';
+import { initPythonParser } from './pythonParser';
 
 /**
  * Comprueba de forma asíncrona si una ruta existe, sin bloquear el event loop.
@@ -76,6 +77,13 @@ function runManagePy(projectRoot: string, commandLine: string): void {
 }
 
 export function activate(context: vscode.ExtensionContext) {
+  // Calentar el parser de tree-sitter en segundo plano: carga el runtime WASM y la
+  // gramática de Python para que la primera expansión de modelos no pague esa latencia.
+  // Es idempotente; los extractores también lo invocan de forma perezosa.
+  void initPythonParser().catch(err => {
+    console.error('Django Structure Explorer: fallo al inicializar el parser de Python:', err);
+  });
+
   const djangoStructureProvider = new DjangoStructureProvider();
   const djangoOutlineProvider = new DjangoOutlineProvider();
   const djangoDefinitionProvider = new DjangoDefinitionProvider();
