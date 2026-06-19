@@ -261,7 +261,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
    */
   private finalizeItems(items: DjangoTreeItem[]): DjangoTreeItem[] {
     if (!this.filterText) {
-      return this.finalizeItems(items);
+      return this.sortItems(items);
     }
     const needle = this.filterText.toLowerCase();
     const filtered = items.filter(item =>
