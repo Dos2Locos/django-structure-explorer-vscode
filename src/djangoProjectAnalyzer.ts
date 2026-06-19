@@ -260,11 +260,11 @@ export class DjangoProjectAnalyzer {
         nameRow: number;
         bases: string[];
       }
+      // topLevelClassDefs desenvuelve las clases con decorador
+      // (p. ej. `@reversion.register()`), que el AST envuelve en
+      // `decorated_definition`; sin esto, esos modelos no se detectarían.
       const classes: ClassInfo[] = [];
-      for (const node of root.namedChildren) {
-        if (node.type !== 'class_definition') {
-          continue;
-        }
+      for (const node of this.topLevelClassDefs(root)) {
         const nameNode = node.childForFieldName('name');
         if (!nameNode) {
           continue;
@@ -519,7 +519,10 @@ export class DjangoProjectAnalyzer {
             viewNode.type === 'call' &&
             finalSegment(viewNode.childForFieldName('function')?.text ?? '') === 'include'
           ) {
-            await this.resolveInclude(viewNode, urlsPath, prefix, visited, urls);
+            // El prefijo de las rutas incluidas es el patrón de ESTE path()
+            // (p. ej. 'blog/'), combinado con el prefijo heredado.
+            const includePrefix = prefix + this.stringLiteralValue(patternNode);
+            await this.resolveInclude(viewNode, urlsPath, includePrefix, visited, urls);
             continue;
           }
 
@@ -573,8 +576,6 @@ export class DjangoProjectAnalyzer {
       return;
     }
     const includedModule = this.stringLiteralValue(moduleNode);
-    const includePrefix =
-      inclPos[1] && inclPos[1].type === 'string' ? this.stringLiteralValue(inclPos[1]) : '';
 
     if (!includedModule.endsWith('.urls')) {
       return;
@@ -594,7 +595,9 @@ export class DjangoProjectAnalyzer {
 
     const includedFilePath = path.join(appPath, 'urls.py');
     if (await pathExists(includedFilePath)) {
-      const includedUrls = await this.extractUrls(includedFilePath, prefix + includePrefix, visited);
+      // `prefix` ya incluye el patrón del path() contenedor; el 2º argumento de
+      // include() es el namespace de la app, no una ruta, así que no se añade.
+      const includedUrls = await this.extractUrls(includedFilePath, prefix, visited);
       urls.push(...includedUrls);
     }
   }
