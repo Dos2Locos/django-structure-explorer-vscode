@@ -463,45 +463,55 @@ export class DjangoProjectAnalyzer {
     const views: DjangoView[] = [];
 
     try {
-      const content = this.stripComments(await readFile(viewsPath, 'utf8'));
-      const lines = content.split('\n');
+      await initPythonParser();
+      const content = await readFile(viewsPath, 'utf8');
+      const root = parsePython(content).rootNode;
 
-      // Expresión regular para encontrar funciones de vista
-      const functionViewRegex = /^def\s+(\w+)\s*\(/;
-      // Clase de vista, capturando las clases base para distinguir DRF.
-      const classViewRegex = /^class\s+(\w+)\s*\(([^)]*)\)?/;
-      // Decorador de nivel superior (sin indentar): captura el nombre tras `@`,
-      // descartando el módulo y los argumentos (p. ej. @auth.login_required(...)).
-      const decoratorRegex = /^@([\w.]+)/;
-      // Decoradores acumulados a la espera de la def/class que decoran.
-      let pendingDecorators: string[] = [];
-
-      for (let i = 0; i < lines.length; i++) {
-        const decoratorMatch = lines[i].match(decoratorRegex);
-        if (decoratorMatch) {
-          pendingDecorators.push(decoratorMatch[1].split('.').pop() as string);
-          continue;
+      for (const node of root.namedChildren) {
+        // Una def/class puede venir envuelta en `decorated_definition`: en ese
+        // caso los decoradores son hijos `decorator` y la def/class real está en
+        // el campo `definition`. El AST ya asocia los decoradores a SU def, así
+        // que no hay arrastre a definiciones posteriores (a diferencia del regex).
+        let decorators: string[] | undefined;
+        let def = node;
+        if (node.type === 'decorated_definition') {
+          decorators = node.namedChildren
+            .filter(c => c.type === 'decorator')
+            .map(c => this.decoratorName(c))
+            .filter((n): n is string => !!n);
+          const inner = node.childForFieldName('definition');
+          if (!inner) {
+            continue;
+          }
+          def = inner;
         }
 
-        const functionMatch = lines[i].match(functionViewRegex);
-        if (functionMatch) {
-          views.push({
-            name: functionMatch[1],
-            lineNumber: i,
-            isClass: false,
-            decorators: pendingDecorators.length ? pendingDecorators : undefined
-          });
-          pendingDecorators = [];
-          continue;
-        }
-
-        const classMatch = lines[i].match(classViewRegex);
-        if (classMatch) {
+        if (def.type === 'function_definition') {
+          const nameNode = def.childForFieldName('name');
+          if (nameNode) {
+            views.push({
+              name: nameNode.text,
+              lineNumber: nameNode.startPosition.row,
+              isClass: false,
+              decorators: decorators && decorators.length ? decorators : undefined
+            });
+          }
+        } else if (def.type === 'class_definition') {
+          const nameNode = def.childForFieldName('name');
+          if (!nameNode) {
+            continue;
+          }
           // Clasificar como DRF según la clase base: *ViewSet (routers) o
           // *APIView / *GenericAPIView (APIView y vistas genéricas).
-          const bases = (classMatch[2] || '')
-            .split(',')
-            .map(b => (b.trim().split('.').pop() || '').trim());
+          const bases: string[] = [];
+          const supers = def.childForFieldName('superclasses');
+          if (supers) {
+            for (const arg of supers.namedChildren) {
+              if (arg.type === 'identifier' || arg.type === 'attribute') {
+                bases.push(finalSegment(arg.text));
+              }
+            }
+          }
           let apiKind: 'viewset' | 'apiview' | undefined;
           if (bases.some(b => /ViewSet$/.test(b))) {
             apiKind = 'viewset';
@@ -510,20 +520,12 @@ export class DjangoProjectAnalyzer {
           }
 
           views.push({
-            name: classMatch[1],
-            lineNumber: i,
+            name: nameNode.text,
+            lineNumber: nameNode.startPosition.row,
             isClass: true,
             apiKind,
-            decorators: pendingDecorators.length ? pendingDecorators : undefined
+            decorators: decorators && decorators.length ? decorators : undefined
           });
-          pendingDecorators = [];
-          continue;
-        }
-
-        // Cualquier otra línea no vacía rompe la cadena de decoradores
-        // pendientes (evita arrastrarlos hasta una def/class posterior).
-        if (lines[i].trim() !== '') {
-          pendingDecorators = [];
         }
       }
     } catch (error) {
@@ -531,6 +533,22 @@ export class DjangoProjectAnalyzer {
     }
 
     return views;
+  }
+
+  /**
+   * Devuelve el nombre "limpio" de un nodo `decorator` del AST: descarta el
+   * módulo y los argumentos. Ejemplos: `@login_required` → `login_required`,
+   * `@auth.permission_required(...)` → `permission_required`,
+   * `@app.task` → `task`. Devuelve undefined si no se puede resolver.
+   */
+  private decoratorName(decorator: SyntaxNode): string | undefined {
+    const expr = decorator.namedChildren[0];
+    if (!expr) {
+      return undefined;
+    }
+    // `@foo(...)` es un `call`; el nombre está en su campo `function`.
+    const target = expr.type === 'call' ? expr.childForFieldName('function') : expr;
+    return target ? finalSegment(target.text) : undefined;
   }
 
   /**
