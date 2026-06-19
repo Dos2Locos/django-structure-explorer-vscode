@@ -725,73 +725,122 @@ export class DjangoProjectAnalyzer {
     const adminClasses: DjangoAdminClass[] = [];
 
     try {
-      const content = this.stripComments(await readFile(adminPath, 'utf8'));
-      const lineOf = (index: number): number =>
-        content.substring(0, index).split('\n').length - 1;
+      await initPythonParser();
+      const content = await readFile(adminPath, 'utf8');
+      const root = parsePython(content).rootNode;
 
       // Clases ya asociadas a un modelo vía decorador, para no duplicarlas
       // en el escaneo de clases.
       const decoratedClasses = new Set<string>();
 
-      // Decoradores @admin.register(A, B, ...): admite varios modelos y
-      // decoradores apilados antes de la clase (se busca la primera `class` posterior).
-      const decoratorRegex = /@admin\.register\s*\(([^)]*)\)/g;
-      let decoratorMatch: RegExpExecArray | null;
-      while ((decoratorMatch = decoratorRegex.exec(content)) !== null) {
-        const models = decoratorMatch[1]
-          .split(',')
-          .map(m => m.trim())
-          .filter(Boolean);
-        const classAfter = content.substring(decoratorMatch.index).match(/\bclass\s+(\w+)\s*\(/);
-        if (classAfter && models.length > 0) {
-          decoratedClasses.add(classAfter[1]);
+      // Busca `model = X` en el cuerpo de una clase y devuelve el nombre del modelo.
+      const findModelAttr = (classNode: SyntaxNode): string => {
+        const body = classNode.childForFieldName('body');
+        if (!body) {
+          return '';
+        }
+        for (const stmt of body.namedChildren) {
+          if (stmt.type !== 'expression_statement') {
+            continue;
+          }
+          const assignment = stmt.namedChildren[0];
+          if (assignment && assignment.type === 'assignment') {
+            const left = assignment.childForFieldName('left');
+            const right = assignment.childForFieldName('right');
+            if (left && left.text === 'model' && right) {
+              return right.text;
+            }
+          }
+        }
+        return '';
+      };
+
+      const isAdminBase = (baseFullText: string): boolean => {
+        const baseName = finalSegment(baseFullText);
+        return /Admin$/.test(baseName) || baseName === 'TabularInline' || baseName === 'StackedInline';
+      };
+
+      // 1) Clases decoradas con @admin.register(A, B, ...): admite varios modelos.
+      for (const node of root.namedChildren) {
+        if (node.type !== 'decorated_definition') {
+          continue;
+        }
+        const def = node.childForFieldName('definition');
+        if (!def || def.type !== 'class_definition') {
+          continue;
+        }
+        const registerDec = node.namedChildren.find(
+          c =>
+            c.type === 'decorator' &&
+            c.namedChildren[0]?.type === 'call' &&
+            c.namedChildren[0]?.childForFieldName('function')?.text === 'admin.register'
+        );
+        if (!registerDec) {
+          continue;
+        }
+        const nameNode = def.childForFieldName('name');
+        const callArgs = registerDec.namedChildren[0].childForFieldName('arguments');
+        const models = callArgs
+          ? callArgs.namedChildren
+              .filter(a => a.type !== 'keyword_argument' && a.type !== 'comment')
+              .map(a => a.text)
+          : [];
+        if (nameNode && models.length > 0) {
+          decoratedClasses.add(nameNode.text);
           adminClasses.push({
-            name: classAfter[1],
-            lineNumber: lineOf(decoratorMatch.index),
+            name: nameNode.text,
+            lineNumber: node.startPosition.row,
             modelName: models.join(', ')
           });
         }
       }
 
-      // Clases de admin declaradas: ModelAdmin, inlines o herencia custom (*Admin).
-      const classRegex = /class\s+(\w+)\s*\(\s*([\w.]+)\s*\)/g;
-      let classMatch: RegExpExecArray | null;
-      while ((classMatch = classRegex.exec(content)) !== null) {
-        const className = classMatch[1];
-        const baseName = classMatch[2].split('.').pop() || classMatch[2];
-        const isAdminBase =
-          /Admin$/.test(baseName) ||
-          baseName === 'TabularInline' ||
-          baseName === 'StackedInline';
-        if (!isAdminBase || decoratedClasses.has(className)) {
+      // 2) Clases de admin declaradas: ModelAdmin, inlines o herencia custom (*Admin).
+      for (const node of root.namedChildren) {
+        if (node.type !== 'class_definition') {
           continue;
         }
-
-        // Buscar `model = X` SOLO dentro del cuerpo de esta clase (hasta el
-        // siguiente `class` en columna 0 o el final del archivo), no en todo el resto.
-        const restAfter = content.substring(classMatch.index + classMatch[0].length);
-        const nextClass = restAfter.search(/\nclass\s/);
-        const body = nextClass >= 0 ? restAfter.substring(0, nextClass) : restAfter;
-        const modelMatch = body.match(/\bmodel\s*=\s*(\w+)/);
-
+        const nameNode = node.childForFieldName('name');
+        if (!nameNode || decoratedClasses.has(nameNode.text)) {
+          continue;
+        }
+        const supers = node.childForFieldName('superclasses');
+        const bases = supers
+          ? supers.namedChildren.filter(a => a.type === 'identifier' || a.type === 'attribute').map(a => a.text)
+          : [];
+        if (!bases.some(isAdminBase)) {
+          continue;
+        }
         adminClasses.push({
-          name: className,
-          lineNumber: lineOf(classMatch.index),
-          modelName: modelMatch ? modelMatch[1] : ''
+          name: nameNode.text,
+          lineNumber: nameNode.startPosition.row,
+          modelName: findModelAttr(node)
         });
       }
 
-      // Registros directos: admin.site.register(Model, AdminClass?).
-      const registerRegex = /admin\.site\.register\s*\(\s*(\w+)(?:\s*,\s*(\w+))?\s*\)/g;
-      let registerMatch: RegExpExecArray | null;
-      while ((registerMatch = registerRegex.exec(content)) !== null) {
-        adminClasses.push({
-          name: registerMatch[2] || 'ModelAdmin',
-          lineNumber: lineOf(registerMatch.index),
-          modelName: registerMatch[1]
-        });
-      }
-
+      // 3) Registros directos: admin.site.register(Model, AdminClass?).
+      const collectRegisters = (node: SyntaxNode): void => {
+        if (
+          node.type === 'call' &&
+          node.childForFieldName('function')?.text === 'admin.site.register'
+        ) {
+          const args = node.childForFieldName('arguments');
+          const pos = args
+            ? args.namedChildren.filter(a => a.type !== 'keyword_argument' && a.type !== 'comment')
+            : [];
+          if (pos[0]) {
+            adminClasses.push({
+              name: pos[1]?.text || 'ModelAdmin',
+              lineNumber: node.startPosition.row,
+              modelName: pos[0].text
+            });
+          }
+        }
+        for (const child of node.namedChildren) {
+          collectRegisters(child);
+        }
+      };
+      collectRegisters(root);
     } catch (error) {
       reportError('Error al analizar clases de admin', error);
     }
