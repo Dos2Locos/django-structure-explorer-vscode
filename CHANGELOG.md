@@ -4,6 +4,17 @@ Todas las novedades relevantes de la extensión se documentan en este archivo.
 El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/)
 y el proyecto se adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
+## [1.4.1] - 2026-06-19
+
+### Corregido
+- `findMainUrlsFile` exige `settings.py` junto al `urls.py` para resolver el
+  URLconf raíz (no la primera app alfabética); las URLs traídas por `include()`
+  abren su fichero real. _(Porta el arreglo de @mvanorder, PR #3.)_
+
+### Interno
+- Saneado del paquete: se excluyen del `.vsix` los `*.log`, `out/test/` y
+  `.mocharc.json`, y se purga del repositorio un log local que se había colado.
+
 ## [1.4.0] - 2026-06-19
 
 ### Cambiado
