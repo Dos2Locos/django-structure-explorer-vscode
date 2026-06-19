@@ -1,0 +1,278 @@
+log.ts:117   ERR Unhandled method getIdAtPosition: Error: Unhandled method getIdAtPosition
+	at /Users/cgomez/.vscode/extensions/visualstudioexptteam.intellicode-api-usage-examples-0.2.9/dist/extension.js:2:246605
+	at re (/Users/cgomez/.vscode/extensions/visualstudioexptteam.intellicode-api-usage-examples-0.2.9/dist/extension.js:2:246899)
+	at /Users/cgomez/.vscode/extensions/visualstudioexptteam.intellicode-api-usage-examples-0.2.9/dist/extension.js:2:241683
+	at Immediate.<anonymous> (/Users/cgomez/.vscode/extensions/visualstudioexptteam.intellicode-api-usage-examples-0.2.9/dist/extension.js:2:241703)
+	at process.processImmediate (node:internal/timers:504:21)
+logToConsole @ log.ts:117
+error @ log.ts:564
+error @ log.ts:669
+error @ logService.ts:51
+handleUnexpectedError @ workbench.ts:128
+(anonymous) @ workbench.ts:109
+onUnexpectedExternalError @ errors.ts:71
+onUnexpectedExternalError @ errors.ts:118
+(anonymous) @ codeAction.ts:148
+await in (anonymous)
+getCodeActions @ codeAction.ts:125
+(anonymous) @ codeActionModel.ts:356
+createCancelablePromise @ async.ts:37
+(anonymous) @ codeActionModel.ts:250
+trigger @ codeActionModel.ts:54
+(anonymous) @ codeActionModel.ts:66
+(anonymous) @ async.ts:1056
+setTimeout
+(anonymous) @ window.ts:125
+cancelAndSet @ async.ts:1054
+_tryAutoTrigger @ codeActionModel.ts:65
+_onMarkerChanges @ codeActionModel.ts:60
+(anonymous) @ codeActionModel.ts:48
+_deliver @ event.ts:1364
+_deliverQueue @ event.ts:1375
+fire @ event.ts:1399
+(anonymous) @ event.ts:1612
+log.ts:117   ERR Unhandled method getIdAtPosition: Error: Unhandled method getIdAtPosition
+	at /Users/cgomez/.vscode/extensions/visualstudioexptteam.intellicode-api-usage-examples-0.2.9/dist/extension.js:2:246605
+	at re (/Users/cgomez/.vscode/extensions/visualstudioexptteam.intellicode-api-usage-examples-0.2.9/dist/extension.js:2:246899)
+	at /Users/cgomez/.vscode/extensions/visualstudioexptteam.intellicode-api-usage-examples-0.2.9/dist/extension.js:2:241683
+	at Immediate.<anonymous> (/Users/cgomez/.vscode/extensions/visualstudioexptteam.intellicode-api-usage-examples-0.2.9/dist/extension.js:2:241703)
+	at process.processImmediate (node:internal/timers:504:21)
+logToConsole @ log.ts:117
+error @ log.ts:564
+error @ log.ts:669
+error @ logService.ts:51
+handleUnexpectedError @ workbench.ts:128
+(anonymous) @ workbench.ts:109
+onUnexpectedExternalError @ errors.ts:71
+onUnexpectedExternalError @ errors.ts:118
+(anonymous) @ codeAction.ts:148
+await in (anonymous)
+getCodeActions @ codeAction.ts:125
+(anonymous) @ codeActionModel.ts:356
+createCancelablePromise @ async.ts:37
+(anonymous) @ codeActionModel.ts:250
+trigger @ codeActionModel.ts:54
+_update @ codeActionModel.ts:386
+(anonymous) @ codeActionModel.ts:199
+_deliver @ event.ts:1364
+_deliverQueue @ event.ts:1375
+fire @ event.ts:1399
+setModel @ codeEditorWidget.ts:541
+setInput @ textFileEditor.ts:129
+await in setInput
+doSetInput @ editorPanes.ts:464
+doOpenEditor @ editorPanes.ts:259
+openEditor @ editorPanes.ts:136
+(anonymous) @ editorGroupView.ts:1260
+doShowEditor @ editorGroupView.ts:1284
+doOpenEditor @ editorGroupView.ts:1242
+openEditor @ editorGroupView.ts:1146
+openEditor @ editorService.ts:592
+await in openEditor
+$tryShowTextDocument @ mainThreadEditors.ts:260
+_doInvokeHandler @ rpcProtocol.ts:458
+_invokeHandler @ rpcProtocol.ts:443
+_receiveRequest @ rpcProtocol.ts:373
+_receiveOneMessage @ rpcProtocol.ts:299
+(anonymous) @ rpcProtocol.ts:161
+_deliver @ event.ts:1364
+fire @ event.ts:1395
+fire @ ipc.net.ts:658
+(anonymous) @ localProcessExtensionHost.ts:421
+log.ts:117   ERR Unhandled method getIdAtPosition: Error: Unhandled method getIdAtPosition
+	at /Users/cgomez/.vscode/extensions/visualstudioexptteam.intellicode-api-usage-examples-0.2.9/dist/extension.js:2:246605
+	at re (/Users/cgomez/.vscode/extensions/visualstudioexptteam.intellicode-api-usage-examples-0.2.9/dist/extension.js:2:246899)
+	at /Users/cgomez/.vscode/extensions/visualstudioexptteam.intellicode-api-usage-examples-0.2.9/dist/extension.js:2:241683
+	at Immediate.<anonymous> (/Users/cgomez/.vscode/extensions/visualstudioexptteam.intellicode-api-usage-examples-0.2.9/dist/extension.js:2:241703)
+	at process.processImmediate (node:internal/timers:504:21)
+logToConsole @ log.ts:117
+error @ log.ts:564
+error @ log.ts:669
+error @ logService.ts:51
+handleUnexpectedError @ workbench.ts:128
+(anonymous) @ workbench.ts:109
+onUnexpectedExternalError @ errors.ts:71
+onUnexpectedExternalError @ errors.ts:118
+(anonymous) @ codeAction.ts:148
+await in (anonymous)
+getCodeActions @ codeAction.ts:125
+(anonymous) @ codeActionModel.ts:356
+createCancelablePromise @ async.ts:37
+(anonymous) @ codeActionModel.ts:250
+trigger @ codeActionModel.ts:54
+_update @ codeActionModel.ts:386
+(anonymous) @ codeActionModel.ts:199
+_deliver @ event.ts:1364
+_deliverQueue @ event.ts:1375
+fire @ event.ts:1386
+(anonymous) @ codeEditorWidget.ts:1862
+_deliver @ event.ts:1364
+fire @ event.ts:1395
+_emitOutgoingEvents @ viewModelEventDispatcher.ts:64
+emitOutgoingEvent @ viewModelEventDispatcher.ts:39
+(anonymous) @ viewModelImpl.ts:564
+_deliver @ event.ts:1364
+fire @ event.ts:1395
+doFire @ textModel.ts:2692
+endDeferredEmit @ textModel.ts:2623
+(anonymous) @ textModel.ts:391
+_deliver @ event.ts:1364
+fire @ event.ts:1395
+(anonymous) @ colorizedBracketPairsDecorationProvider.ts:33
+_deliver @ event.ts:1364
+fire @ event.ts:1395
+updateBracketPairsTree @ bracketPairsImpl.ts:88
+getBracketsInRange @ bracketPairsImpl.ts:117
+getDecorationsInRange @ colorizedBracketPairsDecorationProvider.ts:57
+getDecorationsInRange @ textModel.ts:1830
+getCurrentMatchesPosition @ findDecorations.ts:103
+research @ findModel.ts:220
+constructor @ findModel.ts:138
+_start @ findController.ts:380
+_start @ findController.ts:514
+(anonymous) @ findController.ts:156
+_deliver @ event.ts:1364
+_deliverQueue @ event.ts:1375
+fire @ event.ts:1399
+setModel @ codeEditorWidget.ts:541
+setInput @ textFileEditor.ts:129
+await in setInput
+doSetInput @ editorPanes.ts:464
+doOpenEditor @ editorPanes.ts:259
+openEditor @ editorPanes.ts:136
+(anonymous) @ editorGroupView.ts:1260
+doShowEditor @ editorGroupView.ts:1284
+doOpenEditor @ editorGroupView.ts:1242
+openEditor @ editorGroupView.ts:1146
+openEditor @ editorService.ts:592
+await in openEditor
+$tryShowTextDocument @ mainThreadEditors.ts:260
+_doInvokeHandler @ rpcProtocol.ts:458
+_invokeHandler @ rpcProtocol.ts:443
+_receiveRequest @ rpcProtocol.ts:373
+_receiveOneMessage @ rpcProtocol.ts:299
+(anonymous) @ rpcProtocol.ts:161
+_deliver @ event.ts:1364
+fire @ event.ts:1395
+fire @ ipc.net.ts:658
+(anonymous) @ localProcessExtensionHost.ts:421
+log.ts:117   ERR [Extension Host] Error al extraer símbolos: Error: name must not be falsy
+	at Hr.validate (file:///Applications/Visual%20Studio%20Code.app/Contents/Resources/app/out/vs/workbench/api/node/extensionHostProcess.js:532:36464)
+	at new Hr (file:///Applications/Visual%20Studio%20Code.app/Contents/Resources/app/out/vs/workbench/api/node/extensionHostProcess.js:532:36753)
+	at DjangoOutlineProvider.provideDocumentSymbols (/Users/cgomez/.vscode/extensions/dos2locos.django-structure-explorer-1.3.0/out/djangoOutlineProvider.js:57:39)
+	at async i.provideDocumentSymbols (file:///Applications/Visual%20Studio%20Code.app/Contents/Resources/app/out/vs/workbench/api/node/extensionHostProcess.js:562:135701)
+logToConsole @ log.ts:117
+error @ log.ts:564
+error @ log.ts:669
+error @ logService.ts:51
+(anonymous) @ remoteConsoleUtil.ts:58
+$logExtensionHostMessage @ mainThreadConsole.ts:44
+_doInvokeHandler @ rpcProtocol.ts:458
+_invokeHandler @ rpcProtocol.ts:443
+_receiveRequest @ rpcProtocol.ts:373
+_receiveOneMessage @ rpcProtocol.ts:299
+(anonymous) @ rpcProtocol.ts:161
+_deliver @ event.ts:1364
+fire @ event.ts:1395
+fire @ ipc.net.ts:658
+(anonymous) @ localProcessExtensionHost.ts:421
+console.ts:139 [Extension Host] Error al extraer símbolos: Error: name must not be falsy
+	at Hr.validate (file:///Applications/Visual%20Studio%20Code.app/Contents/Resources/app/out/vs/workbench/api/node/extensionHostProcess.js:532:36464)
+	at new Hr (file:///Applications/Visual%20Studio%20Code.app/Contents/Resources/app/out/vs/workbench/api/node/extensionHostProcess.js:532:36753)
+	at DjangoOutlineProvider.provideDocumentSymbols (/Users/cgomez/.vscode/extensions/dos2locos.django-structure-explorer-1.3.0/out/djangoOutlineProvider.js:57:39)
+	at async i.provideDocumentSymbols (file:///Applications/Visual%20Studio%20Code.app/Contents/Resources/app/out/vs/workbench/api/node/extensionHostProcess.js:562:135701)
+log @ console.ts:139
+$logExtensionHostMessage @ mainThreadConsole.ts:45
+_doInvokeHandler @ rpcProtocol.ts:458
+_invokeHandler @ rpcProtocol.ts:443
+_receiveRequest @ rpcProtocol.ts:373
+_receiveOneMessage @ rpcProtocol.ts:299
+(anonymous) @ rpcProtocol.ts:161
+_deliver @ event.ts:1364
+fire @ event.ts:1395
+fire @ ipc.net.ts:658
+(anonymous) @ localProcessExtensionHost.ts:421
+log.ts:117   ERR [Extension Host] Error al extraer símbolos: Error: name must not be falsy
+	at Hr.validate (file:///Applications/Visual%20Studio%20Code.app/Contents/Resources/app/out/vs/workbench/api/node/extensionHostProcess.js:532:36464)
+	at new Hr (file:///Applications/Visual%20Studio%20Code.app/Contents/Resources/app/out/vs/workbench/api/node/extensionHostProcess.js:532:36753)
+	at DjangoOutlineProvider.provideDocumentSymbols (/Users/cgomez/.vscode/extensions/dos2locos.django-structure-explorer-1.3.0/out/djangoOutlineProvider.js:57:39)
+	at async i.provideDocumentSymbols (file:///Applications/Visual%20Studio%20Code.app/Contents/Resources/app/out/vs/workbench/api/node/extensionHostProcess.js:562:135701)
+logToConsole @ log.ts:117
+error @ log.ts:564
+error @ log.ts:669
+error @ logService.ts:51
+(anonymous) @ remoteConsoleUtil.ts:58
+$logExtensionHostMessage @ mainThreadConsole.ts:44
+_doInvokeHandler @ rpcProtocol.ts:458
+_invokeHandler @ rpcProtocol.ts:443
+_receiveRequest @ rpcProtocol.ts:373
+_receiveOneMessage @ rpcProtocol.ts:299
+(anonymous) @ rpcProtocol.ts:161
+_deliver @ event.ts:1364
+fire @ event.ts:1395
+fire @ ipc.net.ts:658
+(anonymous) @ localProcessExtensionHost.ts:421
+console.ts:139 [Extension Host] Error al extraer símbolos: Error: name must not be falsy
+	at Hr.validate (file:///Applications/Visual%20Studio%20Code.app/Contents/Resources/app/out/vs/workbench/api/node/extensionHostProcess.js:532:36464)
+	at new Hr (file:///Applications/Visual%20Studio%20Code.app/Contents/Resources/app/out/vs/workbench/api/node/extensionHostProcess.js:532:36753)
+	at DjangoOutlineProvider.provideDocumentSymbols (/Users/cgomez/.vscode/extensions/dos2locos.django-structure-explorer-1.3.0/out/djangoOutlineProvider.js:57:39)
+	at async i.provideDocumentSymbols (file:///Applications/Visual%20Studio%20Code.app/Contents/Resources/app/out/vs/workbench/api/node/extensionHostProcess.js:562:135701)
+log @ console.ts:139
+$logExtensionHostMessage @ mainThreadConsole.ts:45
+_doInvokeHandler @ rpcProtocol.ts:458
+_invokeHandler @ rpcProtocol.ts:443
+_receiveRequest @ rpcProtocol.ts:373
+_receiveOneMessage @ rpcProtocol.ts:299
+(anonymous) @ rpcProtocol.ts:161
+_deliver @ event.ts:1364
+fire @ event.ts:1395
+fire @ ipc.net.ts:658
+(anonymous) @ localProcessExtensionHost.ts:421
+log.ts:117   ERR [Extension Host] [DjangoStructureExplorer] Error en getChildren: Maximum call stack size exceeded
+logToConsole @ log.ts:117
+error @ log.ts:564
+error @ log.ts:669
+error @ logService.ts:51
+(anonymous) @ remoteConsoleUtil.ts:58
+$logExtensionHostMessage @ mainThreadConsole.ts:44
+_doInvokeHandler @ rpcProtocol.ts:458
+_invokeHandler @ rpcProtocol.ts:443
+_receiveRequest @ rpcProtocol.ts:373
+_receiveOneMessage @ rpcProtocol.ts:299
+(anonymous) @ rpcProtocol.ts:161
+_deliver @ event.ts:1364
+fire @ event.ts:1395
+fire @ ipc.net.ts:658
+(anonymous) @ localProcessExtensionHost.ts:421
+console.ts:139 [Extension Host] [DjangoStructureExplorer] Error en getChildren: Maximum call stack size exceeded
+log @ console.ts:139
+$logExtensionHostMessage @ mainThreadConsole.ts:45
+_doInvokeHandler @ rpcProtocol.ts:458
+_invokeHandler @ rpcProtocol.ts:443
+_receiveRequest @ rpcProtocol.ts:373
+_receiveOneMessage @ rpcProtocol.ts:299
+(anonymous) @ rpcProtocol.ts:161
+_deliver @ event.ts:1364
+fire @ event.ts:1395
+fire @ ipc.net.ts:658
+(anonymous) @ localProcessExtensionHost.ts:421
+notificationsAlerts.ts:42 Django Structure Explorer: error inesperado. Maximum call stack size exceeded
+onDidChangeNotification @ notificationsAlerts.ts:42
+(anonymous) @ notificationsAlerts.ts:28
+_deliver @ event.ts:1364
+_deliverQueue @ event.ts:1375
+fire @ event.ts:1399
+addNotification @ notifications.ts:229
+notify @ notificationService.ts:234
+(anonymous) @ mainThreadMessageService.ts:93
+_showMessage @ mainThreadMessageService.ts:56
+$showMessage @ mainThreadMessageService.ts:50
+_doInvokeHandler @ rpcProtocol.ts:458
+_invokeHandler @ rpcProtocol.ts:443
+_receiveRequest @ rpcProtocol.ts:373
+_receiveOneMessage @ rpcProtocol.ts:299
+(anonymous) @ rpcProtocol.ts:161
+_deliver @ event.ts:1364
+fire @ event.ts:1395
+fire @ ipc.net.ts:658
+(anonymous) @ localProcessExtensionHost.ts:421
