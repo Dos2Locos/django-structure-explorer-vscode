@@ -1,0 +1,69 @@
+name: Publish to VS Code Marketplace
+
+# Se ejecuta cuando se ACEPTA (fusiona) una PR contra main. El evento
+# pull_request:closed se dispara tanto al fusionar como al cerrar sin fusionar;
+# el `if` del job filtra para publicar solo cuando la PR se fusionó.
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+jobs:
+  publish:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      # Necesario para crear y empujar el tag de la versión publicada.
+      contents: write
+    steps:
+      - name: Checkout de main (incluye el merge y los tags)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Compilar, lintar y testear
+        run: npm test
+
+      - name: Leer la versión del package.json
+        id: pkg
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Comprobar si la versión ya está publicada (tag existente)
+        id: check
+        env:
+          VERSION: ${{ steps.pkg.outputs.version }}
+        run: |
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            echo "Ya existe el tag v$VERSION; se omite la publicación."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publicar en el Marketplace
+        if: steps.check.outputs.exists == 'false'
+        run: npx --yes @vscode/vsce publish
+        env:
+          # PAT del publisher (Azure DevOps, scope Marketplace > Manage).
+          # Configúralo en Settings > Secrets and variables > Actions.
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Etiquetar la versión publicada
+        if: steps.check.outputs.exists == 'false'
+        env:
+          VERSION: ${{ steps.pkg.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "v$VERSION"
+          git push origin "v$VERSION"
