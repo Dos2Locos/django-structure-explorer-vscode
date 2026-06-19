@@ -719,6 +719,107 @@ export class DjangoProjectAnalyzer {
   }
 
   /**
+   * Devuelve las definiciones de clase de nivel superior del módulo, ya estén
+   * desnudas (`class X(...)`) o envueltas en un `decorated_definition`.
+   */
+  private topLevelClassDefs(root: SyntaxNode): SyntaxNode[] {
+    const result: SyntaxNode[] = [];
+    for (const node of root.namedChildren) {
+      if (node.type === 'class_definition') {
+        result.push(node);
+      } else if (node.type === 'decorated_definition') {
+        const def = node.childForFieldName('definition');
+        if (def && def.type === 'class_definition') {
+          result.push(def);
+        }
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Nombres "finales" de las clases base de una clase (sin módulo):
+   * `serializers.ModelSerializer` → `ModelSerializer`.
+   */
+  private classBaseNames(classNode: SyntaxNode): string[] {
+    const supers = classNode.childForFieldName('superclasses');
+    if (!supers) {
+      return [];
+    }
+    return supers.namedChildren
+      .filter(a => a.type === 'identifier' || a.type === 'attribute')
+      .map(a => finalSegment(a.text));
+  }
+
+  /**
+   * Busca `model = X` en el cuerpo de la clase (típicamente dentro de
+   * `class Meta:`) y devuelve el nombre del modelo, o undefined si no hay.
+   */
+  private findMetaModel(classNode: SyntaxNode): string | undefined {
+    const search = (block: SyntaxNode | null): string | undefined => {
+      if (!block) {
+        return undefined;
+      }
+      for (const child of block.namedChildren) {
+        if (child.type === 'expression_statement') {
+          const assignment = child.namedChildren[0];
+          if (assignment && assignment.type === 'assignment') {
+            const left = assignment.childForFieldName('left');
+            const right = assignment.childForFieldName('right');
+            if (left && left.text === 'model' && right) {
+              return right.text;
+            }
+          }
+        } else if (child.type === 'class_definition') {
+          const found = search(child.childForFieldName('body'));
+          if (found) {
+            return found;
+          }
+        }
+      }
+      return undefined;
+    };
+    return search(classNode.childForFieldName('body'));
+  }
+
+  /**
+   * Devuelve el valor de un argumento con nombre (`keyword=...`) de una llamada.
+   */
+  private keywordArg(call: SyntaxNode, name: string): SyntaxNode | undefined {
+    const args = call.childForFieldName('arguments');
+    if (!args) {
+      return undefined;
+    }
+    for (const a of args.namedChildren) {
+      if (a.type === 'keyword_argument' && a.childForFieldName('name')?.text === name) {
+        return a.childForFieldName('value') ?? undefined;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Argumentos posicionales de una llamada (sin keyword= ni comentarios).
+   */
+  private positionalArgs(call: SyntaxNode): SyntaxNode[] {
+    const args = call.childForFieldName('arguments');
+    if (!args) {
+      return [];
+    }
+    return args.namedChildren.filter(a => a.type !== 'keyword_argument' && a.type !== 'comment');
+  }
+
+  /**
+   * Valores de cadena de un literal de lista (`["GET", "POST"]` → ['GET','POST']).
+   */
+  private stringListValues(node: SyntaxNode | undefined): string[] {
+    if (!node || node.type !== 'list') {
+      return [];
+    }
+    return node.namedChildren.filter(e => e.type === 'string').map(e => this.stringLiteralValue(e));
+  }
+
+  /**
    * Extrae las clases de admin de un archivo admin.py
    */
   async extractAdminClasses(adminPath: string): Promise<DjangoAdminClass[]> {
@@ -1019,35 +1120,19 @@ export class DjangoProjectAnalyzer {
     const serializers: DjangoSerializer[] = [];
 
     try {
-      const content = this.stripComments(await readFile(serializersPath, 'utf8'));
-      const lines = content.split('\n');
-      const classRegex = /^class\s+(\w+)\s*\(([^)]*)\)/;
+      await initPythonParser();
+      const root = parsePython(await readFile(serializersPath, 'utf8')).rootNode;
 
-      for (let i = 0; i < lines.length; i++) {
-        const match = lines[i].match(classRegex);
-        if (!match) {
+      for (const cls of this.topLevelClassDefs(root)) {
+        const nameNode = cls.childForFieldName('name');
+        if (!nameNode || !this.classBaseNames(cls).some(b => /Serializer$/.test(b))) {
           continue;
         }
-        const bases = match[2].split(',').map(b => (b.trim().split('.').pop() || '').trim());
-        if (!bases.some(b => /Serializer$/.test(b))) {
-          continue;
-        }
-
-        // Buscar `model = X` dentro del cuerpo de la clase (hasta la siguiente
-        // clase en columna 0), normalmente dentro de `class Meta:`.
-        let modelName: string | undefined;
-        for (let j = i + 1; j < lines.length; j++) {
-          if (/^class\s/.test(lines[j])) {
-            break;
-          }
-          const modelMatch = lines[j].match(/^\s+model\s*=\s*(\w+)/);
-          if (modelMatch) {
-            modelName = modelMatch[1];
-            break;
-          }
-        }
-
-        serializers.push({ name: match[1], lineNumber: i, modelName });
+        serializers.push({
+          name: nameNode.text,
+          lineNumber: nameNode.startPosition.row,
+          modelName: this.findMetaModel(cls)
+        });
       }
     } catch (error) {
       reportError('Error al analizar serializers', error);
@@ -1064,18 +1149,13 @@ export class DjangoProjectAnalyzer {
     const schemas: DjangoSchema[] = [];
 
     try {
-      const content = this.stripComments(await readFile(schemasPath, 'utf8'));
-      const lines = content.split('\n');
-      const classRegex = /^class\s+(\w+)\s*\(([^)]*)\)/;
+      await initPythonParser();
+      const root = parsePython(await readFile(schemasPath, 'utf8')).rootNode;
 
-      for (let i = 0; i < lines.length; i++) {
-        const match = lines[i].match(classRegex);
-        if (!match) {
-          continue;
-        }
-        const bases = match[2].split(',').map(b => (b.trim().split('.').pop() || '').trim());
-        if (bases.some(b => /Schema$/.test(b))) {
-          schemas.push({ name: match[1], lineNumber: i });
+      for (const cls of this.topLevelClassDefs(root)) {
+        const nameNode = cls.childForFieldName('name');
+        if (nameNode && this.classBaseNames(cls).some(b => /Schema$/.test(b))) {
+          schemas.push({ name: nameNode.text, lineNumber: nameNode.startPosition.row });
         }
       }
     } catch (error) {
@@ -1094,38 +1174,47 @@ export class DjangoProjectAnalyzer {
     const endpoints: DjangoApiEndpoint[] = [];
 
     try {
-      const content = this.stripComments(await readFile(apiPath, 'utf8'));
-      const lines = content.split('\n');
-      const decoratorRegex = /^@(\w+)\.(get|post|put|patch|delete)\s*\(/;
-      const defRegex = /^(?:async\s+)?def\s+(\w+)\s*\(/;
+      await initPythonParser();
+      const root = parsePython(await readFile(apiPath, 'utf8')).rootNode;
+      const httpMethods = new Set(['get', 'post', 'put', 'patch', 'delete']);
 
-      let pendingMethod: string | null = null;
-      let pendingPath = '';
-      let pendingLine = 0;
-
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-
-        const decoratorMatch = line.match(decoratorRegex);
-        if (decoratorMatch) {
-          pendingMethod = decoratorMatch[2].toUpperCase();
-          const pathMatch = line.match(/['"]([^'"]*)['"]/);
-          pendingPath = pathMatch ? pathMatch[1] : '';
-          pendingLine = i;
+      for (const node of root.namedChildren) {
+        if (node.type !== 'decorated_definition') {
+          continue;
+        }
+        const def = node.childForFieldName('definition');
+        if (!def || def.type !== 'function_definition') {
+          continue;
+        }
+        const nameNode = def.childForFieldName('name');
+        if (!nameNode) {
           continue;
         }
 
-        const defMatch = line.match(defRegex);
-        if (defMatch && pendingMethod) {
+        // Decorador @<objeto>.<método>("/ruta"): p. ej. @api.get("/items").
+        for (const dec of node.namedChildren) {
+          if (dec.type !== 'decorator') {
+            continue;
+          }
+          const call = dec.namedChildren[0];
+          const fn = call && call.type === 'call' ? call.childForFieldName('function') : null;
+          if (!fn || fn.type !== 'attribute') {
+            continue;
+          }
+          const method = fn.childForFieldName('attribute')?.text ?? '';
+          if (!httpMethods.has(method)) {
+            continue;
+          }
+          const first = this.positionalArgs(call)[0];
           endpoints.push({
-            method: pendingMethod,
-            path: pendingPath,
-            handler: defMatch[1],
-            lineNumber: pendingLine,
+            method: method.toUpperCase(),
+            path: first && first.type === 'string' ? this.stringLiteralValue(first) : '',
+            handler: nameNode.text,
+            lineNumber: dec.startPosition.row,
             framework: 'ninja',
             filePath: apiPath
           });
-          pendingMethod = null;
+          break;
         }
       }
     } catch (error) {
@@ -1144,51 +1233,58 @@ export class DjangoProjectAnalyzer {
     const endpoints: DjangoApiEndpoint[] = [];
 
     try {
-      const content = this.stripComments(await readFile(filePath, 'utf8'));
-      const lines = content.split('\n');
-      const defRegex = /^(?:async\s+)?def\s+(\w+)\s*\(/;
+      await initPythonParser();
+      const root = parsePython(await readFile(filePath, 'utf8')).rootNode;
 
-      const parseMethods = (raw: string): string[] =>
-        raw.split(',').map(s => s.replace(/['"]/g, '').trim()).filter(Boolean);
-
-      let pending: { method: string; path: string; line: number } | null = null;
-
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-
-        const apiViewMatch = line.match(/^@api_view\s*\(\s*\[([^\]]*)\]/);
-        if (apiViewMatch) {
-          const methods = parseMethods(apiViewMatch[1]);
-          pending = { method: (methods.join(', ') || 'GET').toUpperCase(), path: '', line: i };
-          continue;
+      // @api_view (vistas función) y @action (métodos de ViewSet) pueden estar a
+      // nivel superior o anidados en una clase: se recorre todo el árbol.
+      const walk = (node: SyntaxNode): void => {
+        if (node.type === 'decorated_definition') {
+          const def = node.childForFieldName('definition');
+          if (def && def.type === 'function_definition') {
+            const nameNode = def.childForFieldName('name');
+            if (nameNode) {
+              let pending: { method: string; path: string; line: number } | null = null;
+              for (const dec of node.namedChildren) {
+                if (dec.type !== 'decorator') {
+                  continue;
+                }
+                const call = dec.namedChildren[0];
+                if (!call || call.type !== 'call') {
+                  continue;
+                }
+                const decName = finalSegment(call.childForFieldName('function')?.text ?? '');
+                if (decName === 'api_view') {
+                  const methods = this.stringListValues(this.positionalArgs(call)[0]);
+                  pending = { method: (methods.join(', ') || 'GET').toUpperCase(), path: '', line: dec.startPosition.row };
+                } else if (decName === 'action') {
+                  const methods = this.stringListValues(this.keywordArg(call, 'methods'));
+                  const urlPathNode = this.keywordArg(call, 'url_path');
+                  pending = {
+                    method: (methods.join(', ') || 'GET').toUpperCase(),
+                    path: urlPathNode && urlPathNode.type === 'string' ? this.stringLiteralValue(urlPathNode) : '',
+                    line: dec.startPosition.row
+                  };
+                }
+              }
+              if (pending) {
+                endpoints.push({
+                  method: pending.method,
+                  path: pending.path || nameNode.text,
+                  handler: nameNode.text,
+                  lineNumber: pending.line,
+                  framework: 'drf',
+                  filePath
+                });
+              }
+            }
+          }
         }
-
-        const actionMatch = line.match(/^@action\s*\(/);
-        if (actionMatch) {
-          const methodsMatch = line.match(/methods\s*=\s*\[([^\]]*)\]/);
-          const methods = methodsMatch ? parseMethods(methodsMatch[1]) : [];
-          const urlPathMatch = line.match(/url_path\s*=\s*['"]([^'"]*)['"]/);
-          pending = {
-            method: (methods.join(', ') || 'GET').toUpperCase(),
-            path: urlPathMatch ? urlPathMatch[1] : '',
-            line: i
-          };
-          continue;
+        for (const child of node.namedChildren) {
+          walk(child);
         }
-
-        const defMatch = line.match(defRegex);
-        if (defMatch && pending) {
-          endpoints.push({
-            method: pending.method,
-            path: pending.path || defMatch[1],
-            handler: defMatch[1],
-            lineNumber: pending.line,
-            framework: 'drf',
-            filePath
-          });
-          pending = null;
-        }
-      }
+      };
+      walk(root);
     } catch (error) {
       reportError('Error al analizar endpoints de DRF', error);
     }
@@ -1204,33 +1300,19 @@ export class DjangoProjectAnalyzer {
     const forms: DjangoForm[] = [];
 
     try {
-      const content = this.stripComments(await readFile(formsPath, 'utf8'));
-      const lines = content.split('\n');
-      const classRegex = /^class\s+(\w+)\s*\(([^)]*)\)/;
+      await initPythonParser();
+      const root = parsePython(await readFile(formsPath, 'utf8')).rootNode;
 
-      for (let i = 0; i < lines.length; i++) {
-        const match = lines[i].match(classRegex);
-        if (!match) {
+      for (const cls of this.topLevelClassDefs(root)) {
+        const nameNode = cls.childForFieldName('name');
+        if (!nameNode || !this.classBaseNames(cls).some(b => /Form$/.test(b))) {
           continue;
         }
-        const bases = match[2].split(',').map(b => (b.trim().split('.').pop() || '').trim());
-        if (!bases.some(b => /Form$/.test(b))) {
-          continue;
-        }
-
-        let modelName: string | undefined;
-        for (let j = i + 1; j < lines.length; j++) {
-          if (/^class\s/.test(lines[j])) {
-            break;
-          }
-          const modelMatch = lines[j].match(/^\s+model\s*=\s*(\w+)/);
-          if (modelMatch) {
-            modelName = modelMatch[1];
-            break;
-          }
-        }
-
-        forms.push({ name: match[1], lineNumber: i, modelName });
+        forms.push({
+          name: nameNode.text,
+          lineNumber: nameNode.startPosition.row,
+          modelName: this.findMetaModel(cls)
+        });
       }
     } catch (error) {
       reportError('Error al analizar formularios', error);
@@ -1247,40 +1329,39 @@ export class DjangoProjectAnalyzer {
     const signals: DjangoSignal[] = [];
 
     try {
-      const content = this.stripComments(await readFile(signalsPath, 'utf8'));
-      const lines = content.split('\n');
-      const defRegex = /^(?:async\s+)?def\s+(\w+)\s*\(/;
-      const signalDeclRegex = /^(\w+)\s*=\s*Signal\s*\(/;
-      let pendingReceiver = false;
+      await initPythonParser();
+      const root = parsePython(await readFile(signalsPath, 'utf8')).rootNode;
 
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-
-        if (/^@receiver\b/.test(line)) {
-          pendingReceiver = true;
-          continue;
-        }
-        if (/^@/.test(line)) {
-          // Otro decorador apilado: no rompe la cadena hacia el def.
-          continue;
-        }
-
-        const defMatch = line.match(defRegex);
-        if (defMatch) {
-          if (pendingReceiver) {
-            signals.push({ name: defMatch[1], lineNumber: i, kind: 'receiver' });
+      for (const node of root.namedChildren) {
+        // Funciones decoradas con @receiver(...).
+        if (node.type === 'decorated_definition') {
+          const def = node.childForFieldName('definition');
+          if (def && def.type === 'function_definition') {
+            const isReceiver = node.namedChildren.some(
+              c => c.type === 'decorator' && this.decoratorName(c) === 'receiver'
+            );
+            const nameNode = def.childForFieldName('name');
+            if (isReceiver && nameNode) {
+              signals.push({ name: nameNode.text, lineNumber: nameNode.startPosition.row, kind: 'receiver' });
+            }
           }
-          pendingReceiver = false;
           continue;
         }
 
-        const signalMatch = line.match(signalDeclRegex);
-        if (signalMatch) {
-          signals.push({ name: signalMatch[1], lineNumber: i, kind: 'signal' });
-        }
-
-        if (line !== '') {
-          pendingReceiver = false;
+        // Señales personalizadas: NOMBRE = Signal(...).
+        if (node.type === 'expression_statement') {
+          const assignment = node.namedChildren[0];
+          if (assignment && assignment.type === 'assignment') {
+            const left = assignment.childForFieldName('left');
+            const right = assignment.childForFieldName('right');
+            if (
+              left && left.type === 'identifier' &&
+              right && right.type === 'call' &&
+              finalSegment(right.childForFieldName('function')?.text ?? '') === 'Signal'
+            ) {
+              signals.push({ name: left.text, lineNumber: left.startPosition.row, kind: 'signal' });
+            }
+          }
         }
       }
     } catch (error) {
@@ -1299,34 +1380,41 @@ export class DjangoProjectAnalyzer {
     const tasks: DjangoCeleryTask[] = [];
 
     try {
-      const content = this.stripComments(await readFile(tasksPath, 'utf8'));
-      const lines = content.split('\n');
-      const decoratorRegex = /^@(?:shared_task|\w+\.task)\b/;
-      const defRegex = /^(?:async\s+)?def\s+(\w+)\s*\(/;
-      let pending = false;
+      await initPythonParser();
+      const root = parsePython(await readFile(tasksPath, 'utf8')).rootNode;
 
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
+      // Es Celery si el decorador es `@shared_task` o `@<obj>.task` (con o sin
+      // argumentos). El `@task` desnudo de django.tasks NO cuenta (extractTasks).
+      const isCeleryDecorator = (dec: SyntaxNode): boolean => {
+        const expr = dec.namedChildren[0];
+        if (!expr) {
+          return false;
+        }
+        const target = expr.type === 'call' ? expr.childForFieldName('function') : expr;
+        if (!target) {
+          return false;
+        }
+        if (target.type === 'identifier') {
+          return target.text === 'shared_task';
+        }
+        if (target.type === 'attribute') {
+          return target.childForFieldName('attribute')?.text === 'task';
+        }
+        return false;
+      };
 
-        if (decoratorRegex.test(line)) {
-          pending = true;
+      for (const node of root.namedChildren) {
+        if (node.type !== 'decorated_definition') {
           continue;
         }
-        if (/^@/.test(line)) {
+        const def = node.childForFieldName('definition');
+        if (!def || def.type !== 'function_definition') {
           continue;
         }
-
-        const defMatch = line.match(defRegex);
-        if (defMatch) {
-          if (pending) {
-            tasks.push({ name: defMatch[1], lineNumber: i });
-          }
-          pending = false;
-          continue;
-        }
-
-        if (line !== '') {
-          pending = false;
+        const isCelery = node.namedChildren.some(c => c.type === 'decorator' && isCeleryDecorator(c));
+        const nameNode = def.childForFieldName('name');
+        if (isCelery && nameNode) {
+          tasks.push({ name: nameNode.text, lineNumber: nameNode.startPosition.row });
         }
       }
     } catch (error) {
