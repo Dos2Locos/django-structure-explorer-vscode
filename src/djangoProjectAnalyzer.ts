@@ -571,108 +571,151 @@ export class DjangoProjectAnalyzer {
     visited.add(canonicalPath);
 
     try {
-      const content = this.stripComments(await readFile(urlsPath, 'utf8'));
-      const lines = content.split('\n');
+      await initPythonParser();
+      const content = await readFile(urlsPath, 'utf8');
+      const root = parsePython(content).rootNode;
 
-      // Expresiones regulares para encontrar patrones de URL
-      // `r?` admite raw strings (r'...'/r"...") en re_path()/url() (caso #9).
-      // `[^'"]*` admite el patron vacio de la raiz del sitio: path('').
-      const pathRegex = /path\s*\(\s*r?['"]([^'"]*)['"]\s*,\s*(\w+(?:\.\w+)*)/;
-      const rePathRegex = /re_path\s*\(\s*r?['"]([^'"]*)['"]\s*,\s*(\w+(?:\.\w+)*)/;
-      const urlRegex = /url\s*\(\s*r?['"]([^'"]*)['"]\s*,\s*(\w+(?:\.\w+)*)/;
-
-      // Expresión regular para encontrar includes
-      const includeRegex = /include\s*\(\s*['"]([^'"]+)['"]\s*(?:,\s*['"]([^'"]+)['"]\s*)?\)/;
-
-      // Routers DRF: router.register(r'prefix', SomeViewSet[, ...]) (caso DRF/#12).
-      const routerRegex = /\brouter\.register\s*\(\s*r?['"]([^'"]*)['"]\s*,\s*(\w+(?:\.\w+)*)/;
-      // Detecta el inicio de una llamada path()/re_path()/url() para unir continuaciones.
-      const urlCallStartRegex = /\b(?:re_path|path|url)\s*\(/;
-
-      for (let i = 0; i < lines.length; i++) {
-        // Unir continuaciones cuando una llamada path()/re_path()/url() abre
-        // paréntesis sin cerrarlos en la misma línea (definiciones multilínea).
-        let logicalLine = lines[i];
-        const startLine = i;
-        if (urlCallStartRegex.test(logicalLine)) {
-          let parenDepth =
-            (logicalLine.match(/\(/g) || []).length - (logicalLine.match(/\)/g) || []).length;
-          let j = i;
-          while (parenDepth > 0 && j + 1 < lines.length) {
-            j++;
-            logicalLine += ' ' + lines[j].trim();
-            parenDepth +=
-              (lines[j].match(/\(/g) || []).length - (lines[j].match(/\)/g) || []).length;
-          }
-          i = j; // saltar las líneas ya consumidas
+      // Recolectar TODAS las llamadas del árbol en orden de aparición. El AST
+      // ignora de forma natural los comentarios y une las continuaciones
+      // multilínea, así que ya no hace falta el "logical line" ni stripComments.
+      const calls: SyntaxNode[] = [];
+      const collect = (node: SyntaxNode): void => {
+        if (node.type === 'call') {
+          calls.push(node);
         }
+        for (const child of node.namedChildren) {
+          collect(child);
+        }
+      };
+      collect(root);
 
-        // Buscar patrones de URL directos
-        let match = logicalLine.match(pathRegex) || logicalLine.match(rePathRegex) || logicalLine.match(urlRegex);
-        if (match) {
-          const pattern = prefix + match[1];
-          urls.push({
-            pattern: pattern,
-            viewName: match[2],
-            lineNumber: startLine
-          });
+      // Argumentos posicionales de una llamada (descartando keyword= y comentarios).
+      const positionalArgs = (call: SyntaxNode): SyntaxNode[] => {
+        const args = call.childForFieldName('arguments');
+        if (!args) {
+          return [];
+        }
+        return args.namedChildren.filter(
+          a => a.type !== 'keyword_argument' && a.type !== 'comment'
+        );
+      };
+
+      // Nombre punteado de una vista: `views.home` tal cual; para una CBV
+      // `views.AboutView.as_view()` se usa el objeto de la llamada.
+      const dottedName = (node: SyntaxNode): string =>
+        node.type === 'call' ? (node.childForFieldName('function')?.text ?? node.text) : node.text;
+
+      for (const call of calls) {
+        const fn = call.childForFieldName('function');
+        if (!fn) {
+          continue;
+        }
+        const fnName = finalSegment(fn.text);
+
+        // path()/re_path()/url(): primer argumento string = patrón, segundo = vista.
+        if (fnName === 'path' || fnName === 're_path' || fnName === 'url') {
+          const pos = positionalArgs(call);
+          const patternNode = pos[0];
+          if (!patternNode || patternNode.type !== 'string') {
+            continue;
+          }
+          const viewNode = pos[1];
+
+          // Si el segundo argumento es include(...), es un include, no una ruta.
+          if (
+            viewNode &&
+            viewNode.type === 'call' &&
+            finalSegment(viewNode.childForFieldName('function')?.text ?? '') === 'include'
+          ) {
+            await this.resolveInclude(viewNode, urlsPath, prefix, visited, urls, positionalArgs);
+            continue;
+          }
+
+          if (viewNode) {
+            urls.push({
+              pattern: prefix + this.stringLiteralValue(patternNode),
+              viewName: dottedName(viewNode),
+              lineNumber: call.startPosition.row
+            });
+          }
           continue;
         }
 
-        // Buscar registros de routers DRF (router.register).
-        const routerMatch = logicalLine.match(routerRegex);
-        if (routerMatch) {
-          urls.push({
-            pattern: prefix + routerMatch[1],
-            viewName: routerMatch[2],
-            lineNumber: startLine
-          });
-          continue;
-        }
-
-        // Buscar includes
-        const includeMatch = logicalLine.match(includeRegex);
-        if (includeMatch) {
-          const includedModule = includeMatch[1];
-          const includePrefix = includeMatch[2] || '';
-
-          // Determinar la ruta del archivo incluido
-          let includedFilePath = '';
-          if (includedModule.endsWith('.urls')) {
-            // Convertir formato de módulo a ruta de archivo
-            const parts = includedModule.split('.');
-            const appName = parts[0];
-
-            // Buscar la aplicación en el proyecto
-            const projectRoot = path.dirname(path.dirname(urlsPath));
-            const appPath = path.resolve(projectRoot, appName);
-
-            // Evitar path traversal: el nombre de app viene de include('...') en
-            // un archivo analizado, así que se exige que la ruta resuelta quede
-            // dentro del proyecto (descarta '..', rutas absolutas, etc.).
-            const withinProject =
-              appPath === projectRoot || appPath.startsWith(projectRoot + path.sep);
-
-            if (withinProject && await pathExists(appPath)) {
-              includedFilePath = path.join(appPath, 'urls.py');
-            }
-          }
-
-          if (includedFilePath && await pathExists(includedFilePath)) {
-            // Combinar prefijos
-            const newPrefix = prefix + (includePrefix ? includePrefix : '');
-
-            // Extraer URLs del archivo incluido con el prefijo actualizado
-            const includedUrls = await this.extractUrls(includedFilePath, newPrefix, visited);
-            urls.push(...includedUrls);
+        // Routers DRF: router.register(r'prefix', SomeViewSet[, ...]) (caso #12).
+        if (fnName === 'register' && fn.type === 'attribute') {
+          const pos = positionalArgs(call);
+          const patternNode = pos[0];
+          const viewNode = pos[1];
+          if (patternNode && patternNode.type === 'string' && viewNode) {
+            urls.push({
+              pattern: prefix + this.stringLiteralValue(patternNode),
+              viewName: dottedName(viewNode),
+              lineNumber: call.startPosition.row
+            });
           }
         }
+        // Los include(...) sueltos se procesan vía su path() contenedor (arriba).
       }
     } catch (error) {
       reportError('Error al analizar URLs', error);
     }
 
     return urls;
+  }
+
+  /**
+   * Resuelve un include('app.urls'[, 'namespace']) del AST: localiza el urls.py
+   * de la app (con protección anti path-traversal) y recursa para anexar sus
+   * rutas con el prefijo combinado. El set `visited` corta includes circulares.
+   */
+  private async resolveInclude(
+    includeCall: SyntaxNode,
+    urlsPath: string,
+    prefix: string,
+    visited: Set<string>,
+    urls: DjangoUrl[],
+    positionalArgs: (call: SyntaxNode) => SyntaxNode[]
+  ): Promise<void> {
+    const inclPos = positionalArgs(includeCall);
+    const moduleNode = inclPos[0];
+    if (!moduleNode || moduleNode.type !== 'string') {
+      return;
+    }
+    const includedModule = this.stringLiteralValue(moduleNode);
+    const includePrefix =
+      inclPos[1] && inclPos[1].type === 'string' ? this.stringLiteralValue(inclPos[1]) : '';
+
+    if (!includedModule.endsWith('.urls')) {
+      return;
+    }
+    const appName = includedModule.split('.')[0];
+    const projectRoot = path.dirname(path.dirname(urlsPath));
+    const appPath = path.resolve(projectRoot, appName);
+
+    // Evitar path traversal: el nombre de app viene de include('...') en un
+    // archivo analizado, así que se exige que la ruta resuelta quede dentro del
+    // proyecto (descarta '..', rutas absolutas, etc.).
+    const withinProject =
+      appPath === projectRoot || appPath.startsWith(projectRoot + path.sep);
+    if (!withinProject || !(await pathExists(appPath))) {
+      return;
+    }
+
+    const includedFilePath = path.join(appPath, 'urls.py');
+    if (await pathExists(includedFilePath)) {
+      const includedUrls = await this.extractUrls(includedFilePath, prefix + includePrefix, visited);
+      urls.push(...includedUrls);
+    }
+  }
+
+  /**
+   * Valor "interno" de un literal de cadena del AST: descarta el prefijo
+   * (r/b/u/f y combinaciones) y las comillas (simples, dobles o triples).
+   * Ejemplos: `r'^a/$'` → `^a/$`, `''` → ``, `"""x"""` → `x`.
+   */
+  private stringLiteralValue(node: SyntaxNode): string {
+    const match = node.text.match(/^[rbuf]*('''|"""|'|")([\s\S]*)\1$/i);
+    return match ? match[2] : node.text;
   }
 
   /**
