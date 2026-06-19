@@ -59,13 +59,35 @@ Verificación: `npx @vscode/vsce ls | grep -i '\.wasm$'` debe listar SOLO
 
 ## Estado actual
 
-**Fase 1 COMPLETADA** y commiteada en la rama `feat/tree-sitter-parser`
-(commit `c82de4e`, sin push aún):
+**MIGRACIÓN COMPLETADA.** Todos los extractores de Python usan el AST de
+tree-sitter; `stripComments()` y `escapeRegExp()` ya no existen. Rama
+`feat/tree-sitter-parser`, **45/45 tests verdes** y `tsc` limpio. Sin push aún.
 
-- `src/pythonParser.ts` creado.
-- `extractModels` (línea ~302) migrado a AST. Es el **patrón de referencia** para el resto.
-- Warm-up en `activate()`.
-- **45/45 tests verdes**, suite intacta (`npm test`).
+Commits (sobre `c82de4e`, Fase 1):
+
+- `0143af1` Fase 2 — `extractViews` (+ helper `decoratorName`).
+- `280df29` Fase 3 — `extractUrls` (recorrido de `call`, includes con anti-ciclo
+  y anti-traversal en `resolveInclude`, helper `stringLiteralValue`).
+- `c79565b` Fase 3 — `extractAdminClasses` (`@admin.register`, `*Admin`/inlines,
+  `admin.site.register`).
+- `ee6acf3` Fase 3 — `extractSettings` (asignaciones MAYÚSCULAS de nivel superior,
+  valor completo del AST).
+- `b6b2184` Fase 3 — `extractTasks` (`@task` de `django.tasks`, con alias).
+- `de8632f` Fase 4 — `extractSerializers`, `extractSchemas`, `extractForms`
+  (helpers `topLevelClassDefs`/`classBaseNames`/`findMetaModel`),
+  `extractNinjaEndpoints`, `extractDrfEndpoints`, `extractSignals`,
+  `extractCeleryTasks` (helpers `keywordArg`/`positionalArgs`/`stringListValues`).
+- `313ff25` Fase final — `findUrlName` y `findModelClass` a AST; eliminados
+  `stripComments()` y `escapeRegExp()`.
+
+`extractModels` (línea ~302) sigue siendo el **patrón de referencia**.
+`extractPartials`/`findAppPartials`/`findManagementCommands` NO se migraron
+(operan sobre plantillas HTML o listan ficheros, no parsean Python), según lo previsto.
+
+### Pendiente operativo
+
+- Probar la extensión empaquetada (`vsce ls | grep wasm`) y un proyecto real antes de PR.
+- No hay push ni PR todavía: requiere confirmación explícita del usuario.
 
 ## Patrón de migración (seguir el de `extractModels`)
 
