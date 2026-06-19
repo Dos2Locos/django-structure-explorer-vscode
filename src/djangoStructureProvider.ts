@@ -2,7 +2,58 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { DjangoTreeItem } from './djangoTreeItem';
-import { DjangoProjectAnalyzer, ModelField, DjangoApiEndpoint } from './djangoProjectAnalyzer';
+import { DjangoProjectAnalyzer, ModelField, DjangoApiEndpoint, DEFAULT_EXCLUDED_DIRS } from './djangoProjectAnalyzer';
+
+/**
+ * Busca, en anchura y con profundidad acotada, el primer directorio que contenga
+ * manage.py por debajo de `start`. Recorre en BFS porque la raíz del proyecto
+ * suele estar a uno o dos niveles, y omite directorios pesados (dependencias,
+ * entornos virtuales, cachés, ocultos) para no congelar VS Code en proyectos
+ * grandes. Es síncrono a propósito: se invoca desde el constructor y refresh().
+ *
+ * Función de módulo (sin dependencias de VS Code) para poder probarla de forma
+ * aislada con fixtures de disco.
+ */
+export function findManagePyDir(start: string, maxDepth = 4): string | undefined {
+  let frontier: string[] = [start];
+
+  for (let depth = 0; depth < maxDepth && frontier.length > 0; depth++) {
+    const next: string[] = [];
+
+    for (const dir of frontier) {
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        // Directorios sin permisos: se omiten sin interrumpir la búsqueda.
+        continue;
+      }
+
+      for (const entry of entries) {
+        if (!entry.isDirectory()) {
+          continue;
+        }
+        if (
+          entry.name.startsWith('.') ||
+          entry.name.startsWith('__') ||
+          DEFAULT_EXCLUDED_DIRS.has(entry.name)
+        ) {
+          continue;
+        }
+
+        const childDir = path.join(dir, entry.name);
+        if (fs.existsSync(path.join(childDir, 'manage.py'))) {
+          return childDir;
+        }
+        next.push(childDir);
+      }
+    }
+
+    frontier = next;
+  }
+
+  return undefined;
+}
 
 /**
  * Comprueba de forma asíncrona si una ruta existe, sin bloquear el event loop.
@@ -86,6 +137,10 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
     if (!projectRoot) {
       return [];
     }
+
+    // Afina el escaneo con los patrones del .gitignore antes de listar apps,
+    // settings o plantillas. Es idempotente por raíz, así que apenas cuesta.
+    await this.analyzer.loadIgnorePatterns(projectRoot);
 
     if (!element) {
       // Root level - show main project structure
@@ -212,9 +267,16 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
 
     // Chequeo síncrono acotado al número de raíces del workspace (habitualmente 1).
     for (const folder of workspaceFolders) {
+      // Caso habitual: manage.py vive en la propia raíz del workspace.
       const managePyPath = path.join(folder.uri.fsPath, 'manage.py');
       if (fs.existsSync(managePyPath)) {
         return folder.uri.fsPath;
+      }
+      // Caso monorepo / proyecto anidado: el workspace no es el padre directo de
+      // manage.py (p. ej. backend/, src/, apps/api/). Se busca hacia abajo.
+      const nested = findManagePyDir(folder.uri.fsPath);
+      if (nested) {
+        return nested;
       }
     }
 

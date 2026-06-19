@@ -8,6 +8,8 @@ A Visual Studio Code extension that provides a PyCharm-like Django project struc
 
 - **Project Structure Tree View**: Quickly visualize your entire Django project structure
 - **Smart Django Detection**: Automatically identifies Django apps, models, views, and more
+- **Nested Project Root Detection**: Finds `manage.py` even when it lives in a subfolder (monorepos, projects under `backend/`, `src/`, `apps/api/`, …), not only at the workspace root
+- **`.gitignore`-Aware Scanning**: Skips heavy directories (dependencies, virtualenvs, caches) and also honors the folders declared in your project's `.gitignore`, keeping the tree focused on real source
 - **Model Field Explorer**: View detailed information about model fields and their types
 - **Admin Class Detection**: Navigate to admin classes and their associated models
 - **URL Patterns**: Explore URL patterns and their associated views
@@ -58,7 +60,7 @@ ext install Dos2Locos.django-structure-explorer
 ## Usage
 
 1. Open a Django project in VS Code
-2. The extension activates automatically when it detects a `manage.py` file
+2. The extension activates automatically when it detects a `manage.py` file (including one nested in a subfolder, e.g. `backend/manage.py`)
 3. Access the "Django Explorer" view in the Explorer sidebar
 4. Navigate through your Django project structure
 

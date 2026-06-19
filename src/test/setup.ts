@@ -8,10 +8,34 @@
  */
 import * as Module from 'module';
 
+// TreeItem mínimo: djangoTreeItem.ts hace `class DjangoTreeItem extends
+// vscode.TreeItem` en top-level, así que el stub debe exponer una clase real
+// para que el módulo (y quien lo importe) cargue fuera del host de extensiones.
+class TreeItemStub {
+  tooltip?: string;
+  contextValue?: string;
+  iconPath?: unknown;
+  constructor(public label: string, public collapsibleState?: number) {}
+}
+
+class EventEmitterStub {
+  event = (): void => undefined;
+  fire = (): void => undefined;
+  dispose = (): void => undefined;
+}
+
 const vscodeStub = {
   window: {
     showErrorMessage: (): undefined => undefined
-  }
+  },
+  workspace: {
+    workspaceFolders: undefined
+  },
+  TreeItem: TreeItemStub,
+  TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
+  ThemeIcon: class { constructor(public id: string) {} },
+  EventEmitter: EventEmitterStub,
+  Uri: { file: (p: string): { fsPath: string } => ({ fsPath: p }) }
 };
 
 const moduleRef = Module as unknown as {

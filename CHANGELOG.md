@@ -4,6 +4,26 @@ Todas las novedades relevantes de la extensión se documentan en este archivo.
 El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/)
 y el proyecto se adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
+## [Sin publicar]
+
+### Añadido
+- **Localización recursiva de la raíz del proyecto.** Si `manage.py` no está en la
+  raíz del workspace (monorepos, proyectos en `backend/`, `src/`, `apps/api/`…),
+  ahora se busca hacia abajo en anchura y con profundidad acotada, omitiendo
+  directorios pesados (dependencias, entornos virtuales, cachés, ocultos). Antes
+  el árbol quedaba vacío en esos layouts. _(Idea tomada de la PR #2 de @0x3at,
+  reimplementada sobre el código actual.)_
+- **Exclusión de directorios según `.gitignore`.** Además de la lista por defecto
+  de directorios pesados, el escaneo omite las carpetas declaradas en el
+  `.gitignore` del proyecto. El parseo es conservador: solo nombres de directorio
+  inequívocos (sin globs, rutas anidadas ni negaciones). _(Idea de la PR #2 de
+  @0x3at.)_
+
+### Interno
+- Unificada la lista de directorios excluidos del escaneo en una única constante
+  (`DEFAULT_EXCLUDED_DIRS`), eliminando la duplicación entre `getDirectories` y
+  `findTemplateFiles`. Cobertura de tests para ambas mejoras.
+
 ## [1.4.1] - 2026-06-19
 
 ### Corregido
