@@ -2,7 +2,7 @@
   "name": "django-structure-explorer",
   "displayName": "Django Structure Explorer",
   "description": "PyCharm-style Django project structure explorer for VSCode",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "publisher": "Dos2Locos",
   "repository": {
     "type": "git",
@@ -54,7 +54,7 @@
         {
           "id": "django-explorer",
           "title": "Django Explorer",
-          "icon": "resources/django.svg"
+          "icon": "resources/activity-icon.svg"
         }
       ]
     },
@@ -162,5 +162,9 @@
     "glob": "^7.1.7",
     "mocha": "^11.1.0",
     "typescript": "^4.3.2"
+  },
+  "dependencies": {
+    "tree-sitter-wasms": "0.1.13",
+    "web-tree-sitter": "0.20.8"
   }
 }

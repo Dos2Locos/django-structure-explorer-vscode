@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as util from 'util';
+import { initPythonParser, parsePython, finalSegment, SyntaxNode } from './pythonParser';
 
 const readFile = util.promisify(fs.readFile);
 const readdir = util.promisify(fs.readdir);
@@ -20,21 +21,14 @@ async function pathExists(targetPath: string): Promise<boolean> {
 }
 
 /**
- * Escapa los metacaracteres de una cadena para incrustarla con seguridad dentro
- * de un patrón RegExp. Sin esto, un import malformado (p. ej. con paréntesis)
- * podría romper `new RegExp(...)` y dejar el parseo de campos vacío en silencio.
- */
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/**
  * Registra un error y lo notifica al usuario, en lugar de tragárselo en silencio.
  * Así se distingue "no hay resultados" de "el parseo falló".
  */
 function reportError(context: string, error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
-  console.error(`${context}: ${message}`);
+  // Registrar el objeto error completo (incluye `stack`): así el stacktrace
+  // aparece expandible en la consola de Developer Tools, no solo el mensaje.
+  console.error(`${context}:`, error);
   vscode.window.showErrorMessage(`Django Structure Explorer: ${context}. ${message}`);
 }
 
@@ -150,96 +144,6 @@ export interface DjangoLocation {
 export class DjangoProjectAnalyzer {
 
   /**
-   * Neutraliza los comentarios del contenido para que el análisis por regex no
-   * detecte símbolos dentro de código comentado. Reemplaza por espacios:
-   *  - comentarios de línea (`#` fuera de cadenas), hasta el fin de línea
-   *  - el INTERIOR de bloques de triple comilla (`"""` / `'''`), conservando
-   *    los delimitadores de apertura y cierre
-   *
-   * Conserva la longitud del texto y las posiciones de `\n`, de modo que los
-   * números de línea y los offsets siguen siendo válidos para todos los
-   * extractores (tanto los que iteran `split('\n')` como `extractAdminClasses`,
-   * que calcula la línea con `content.substring(0, index)`).
-   *
-   * Las cadenas normales de una sola línea se conservan intactas: son valores
-   * que el parser necesita (patrones de URL, valores de settings…); solo se
-   * evita interpretar una `#` dentro de ellas como comentario.
-   */
-  private stripComments(content: string): string {
-    const chars = content.split('');
-    const n = chars.length;
-    let inLineComment = false;
-    let single: '"' | "'" | null = null; // cadena de una línea
-    let triple: '"' | "'" | null = null; // bloque de triple comilla
-
-    const blank = (idx: number): void => {
-      if (chars[idx] !== '\n' && chars[idx] !== '\r') {
-        chars[idx] = ' ';
-      }
-    };
-
-    let i = 0;
-    while (i < n) {
-      const c = chars[i];
-
-      if (inLineComment) {
-        if (c === '\n') {
-          inLineComment = false;
-        } else {
-          blank(i);
-        }
-        i++;
-        continue;
-      }
-
-      if (triple) {
-        // ¿Cierre del bloque triple? Conservar los 3 delimitadores.
-        if (c === triple && chars[i + 1] === triple && chars[i + 2] === triple) {
-          triple = null;
-          i += 3;
-          continue;
-        }
-        blank(i);
-        i++;
-        continue;
-      }
-
-      if (single) {
-        if (c === '\\') {
-          i += 2; // saltar el carácter escapado
-          continue;
-        }
-        if (c === single || c === '\n') {
-          single = null; // fin de cadena (las cadenas de una línea no cruzan '\n')
-        }
-        i++;
-        continue;
-      }
-
-      // Fuera de cualquier cadena o comentario
-      if (c === '#') {
-        inLineComment = true;
-        blank(i);
-        i++;
-        continue;
-      }
-      if (c === '"' || c === "'") {
-        if (chars[i + 1] === c && chars[i + 2] === c) {
-          triple = c; // entrar al bloque triple, conservando el delimitador
-          i += 3;
-          continue;
-        }
-        single = c;
-        i++;
-        continue;
-      }
-      i++;
-    }
-
-    return chars.join('');
-  }
-
-  /**
    * Busca todos los archivos settings.py en el proyecto
    */
   async findSettingsFiles(projectRoot: string): Promise<string[]> {
@@ -302,376 +206,152 @@ export class DjangoProjectAnalyzer {
     const models: DjangoModel[] = [];
 
     try {
-      const content = this.stripComments(await readFile(modelsPath, 'utf8'));
-      const lines = content.split('\n');
+      await initPythonParser();
+      const content = await readFile(modelsPath, 'utf8');
+      const root = parsePython(content).rootNode;
 
-      // Analizar las importaciones para detectar alias de models o importaciones directas
-      const importAliases: {[key: string]: string} = {};
-      const directImports: string[] = [];
-
-      // Buscar importaciones como "from django.db import models" o "from django.db.models import CharField, TextField"
-      for (let i = 0; i < 30 && i < lines.length; i++) { // Revisar solo las primeras líneas
-        const line = lines[i].trim();
-
-        // Detectar alias de models
-        const aliasMatch = line.match(/^from\s+django\.db\s+import\s+models\s+as\s+(\w+)/);
-        if (aliasMatch) {
-          importAliases['models'] = aliasMatch[1];
+      // Importaciones: mapa nombre→módulo, para detectar modelos cuya clase base
+      // se importa de un módulo `*.models` (p. ej. `from core.models import BaseModel`).
+      const importedBaseClasses: { [name: string]: string } = {};
+      for (const imp of root.namedChildren) {
+        if (imp.type !== 'import_from_statement') {
+          continue;
         }
-
-        // Detectar importaciones directas de tipos de campo
-        const directImportMatch = line.match(/^from\s+django\.db\.models\s+import\s+(.+)$/);
-        if (directImportMatch) {
-          const imports = directImportMatch[1].split(',').map(i => i.trim());
-          directImports.push(...imports);
-        }
-      }
-
-      // Almacenar las clases base importadas que podrían ser modelos
-      const importedBaseClasses: {[key: string]: string} = {};
-
-      // Buscar importaciones de clases base personalizadas
-      for (let i = 0; i < 30 && i < lines.length; i++) {
-        const line = lines[i].trim();
-
-        // Detectar importaciones de clases base
-        const baseClassMatch = line.match(/^from\s+([\w.]+)\s+import\s+([\w,\s]+)$/);
-        if (baseClassMatch) {
-          const module = baseClassMatch[1];
-          const imports = baseClassMatch[2].split(',').map(i => i.trim());
-
-          imports.forEach(importName => {
-            importedBaseClasses[importName] = module;
-          });
-        }
-      }
-
-      // Función para verificar si una clase base es un modelo Django basado en importaciones
-      const isDjangoModel = (baseClass: string): boolean => {
-        // Casos directos
-        if (baseClass === 'models.Model' || baseClass === 'Model') {
-          return true;
-        }
-
-        // Verificar clases importadas
-        const cleanBase = baseClass.trim();
-        if (importedBaseClasses[cleanBase]) {
-          const module = importedBaseClasses[cleanBase];
-          return module.includes('django.db.models') ||
-                 module.includes('django.contrib.gis.db.models') ||
-                 module.endsWith('.models');
-        }
-
-        return false;
-      };
-
-      // Mantener un registro de las clases que son modelos
-      const modelClasses = new Set<string>();
-
-      // Lista de clases base comunes que indican que es un modelo
-      const modelBaseClasses = [
-        'Model',
-        'models.Model',
-        'TranslatableModel',
-        'MPTTModel',
-        'AbstractUser',
-        'AbstractBaseUser',
-        'TimeStampedModel',
-        'BaseModel',
-        'DjangoModel',
-        'ChangeControlMixin',  // Aunque es un mixin, lo incluimos para detectar modelos que lo usan
-        'SoftDeletableModel',
-        'TimestampedModel',
-        'UUIDModel',
-        'TreeModel',
-        'Page',
-        'AbstractPage',
-        'AbstractModel',
-        'AbstractBaseModel'
-      ];
-
-      // Primera pasada: identificar todas las clases que heredan directamente de Model o clases base conocidas
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (line.startsWith('class ')) {
-          const classMatch = line.match(/^class\s+(\w+)\s*\(([^)]+)\)/);
-          if (classMatch) {
-            const className = classMatch[1];
-            const baseClasses = classMatch[2].split(',').map(c => c.trim());
-
-            // Verificar si hereda de alguna clase base conocida explícitamente o a través de importación
-            if (baseClasses.some(base =>
-              modelBaseClasses.includes(base.split('.')?.pop() || base) ||
-              isDjangoModel(base)
-            )) {
-              modelClasses.add(className);
-            }
+        const moduleNode = imp.childForFieldName('module_name');
+        const module = moduleNode ? moduleNode.text : '';
+        for (const child of imp.namedChildren) {
+          if ((moduleNode && child.id === moduleNode.id) || child.type === 'wildcard_import') {
+            continue;
+          }
+          const importedName = child.type === 'aliased_import'
+            ? (child.childForFieldName('name')?.text ?? child.text)
+            : child.text;
+          if (importedName) {
+            importedBaseClasses[importedName] = module;
           }
         }
       }
 
-      // Segunda pasada: identificar clases que heredan de modelos ya identificados
-      let newModelsFound = true;
-      while (newModelsFound) {
-        newModelsFound = false;
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i].trim();
-          if (line.startsWith('class ')) {
-            const classMatch = line.match(/^class\s+(\w+)\s*\(([^)]+)\)/);
-            if (classMatch) {
-              const className = classMatch[1];
-              if (!modelClasses.has(className)) {
-                const baseClasses = classMatch[2].split(',').map(c => c.trim());
-                // Si alguna clase base es un modelo conocido, esta también es un modelo
-                if (baseClasses.some(base => modelClasses.has(base))) {
-                  modelClasses.add(className);
-                  newModelsFound = true;
+      const isDjangoModelBase = (baseFullText: string): boolean => {
+        if (baseFullText === 'models.Model' || baseFullText === 'Model') {
+          return true;
+        }
+        const module = importedBaseClasses[baseFullText.trim()];
+        if (module) {
+          return module.includes('django.db.models') ||
+                 module.includes('django.contrib.gis.db.models') ||
+                 module.endsWith('.models');
+        }
+        return false;
+      };
+
+      // Clases base que, por convención, indican que la clase es un modelo Django.
+      const modelBaseClasses = new Set([
+        'Model', 'models.Model', 'TranslatableModel', 'MPTTModel', 'AbstractUser',
+        'AbstractBaseUser', 'TimeStampedModel', 'BaseModel', 'DjangoModel',
+        'ChangeControlMixin', 'SoftDeletableModel', 'TimestampedModel', 'UUIDModel',
+        'TreeModel', 'Page', 'AbstractPage', 'AbstractModel', 'AbstractBaseModel'
+      ]);
+
+      // Recolectar todas las clases de nivel superior con sus bases (texto completo).
+      interface ClassInfo {
+        node: SyntaxNode;
+        name: string;
+        nameRow: number;
+        bases: string[];
+      }
+      // topLevelClassDefs desenvuelve las clases con decorador
+      // (p. ej. `@reversion.register()`), que el AST envuelve en
+      // `decorated_definition`; sin esto, esos modelos no se detectarían.
+      const classes: ClassInfo[] = [];
+      for (const node of this.topLevelClassDefs(root)) {
+        const nameNode = node.childForFieldName('name');
+        if (!nameNode) {
+          continue;
+        }
+        const bases: string[] = [];
+        const supers = node.childForFieldName('superclasses');
+        if (supers) {
+          for (const arg of supers.namedChildren) {
+            if (arg.type === 'identifier' || arg.type === 'attribute') {
+              bases.push(arg.text);
+            }
+          }
+        }
+        classes.push({ node, name: nameNode.text, nameRow: nameNode.startPosition.row, bases });
+      }
+
+      // Determinar qué clases son modelos: base conocida / importada de `*.models` …
+      const modelClasses = new Set<string>();
+      for (const cls of classes) {
+        if (cls.bases.some(b => modelBaseClasses.has(finalSegment(b)) || isDjangoModelBase(b))) {
+          modelClasses.add(cls.name);
+        }
+      }
+      // … y herencia transitiva (un modelo que hereda de otro modelo ya identificado).
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const cls of classes) {
+          if (!modelClasses.has(cls.name) && cls.bases.some(b => modelClasses.has(finalSegment(b)))) {
+            modelClasses.add(cls.name);
+            changed = true;
+          }
+        }
+      }
+
+      // Extraer campos de cada modelo, en orden de aparición. El AST ignora de forma
+      // natural los comentarios (incluso con paréntesis) y las clases anidadas (Meta).
+      for (const cls of classes) {
+        if (!modelClasses.has(cls.name)) {
+          continue;
+        }
+        const model: DjangoModel = { name: cls.name, lineNumber: cls.nameRow, fields: [] };
+        const body = cls.node.childForFieldName('body');
+        if (body) {
+          for (const stmt of body.namedChildren) {
+            // Campo: asignación de nivel superior cuyo valor es una llamada
+            // (p. ej. `created = models.DateTimeField(...)`). Multilínea incluido.
+            if (stmt.type === 'expression_statement') {
+              const assignment = stmt.namedChildren[0];
+              if (assignment && assignment.type === 'assignment') {
+                const left = assignment.childForFieldName('left');
+                const right = assignment.childForFieldName('right');
+                if (left && left.type === 'identifier' && right && right.type === 'call') {
+                  const fn = right.childForFieldName('function');
+                  const calleeText = fn
+                    ? (fn.type === 'attribute' ? (fn.childForFieldName('attribute')?.text ?? fn.text) : fn.text)
+                    : 'unknown';
+                  model.fields!.push({
+                    name: left.text,
+                    fieldType: finalSegment(calleeText),
+                    lineNumber: assignment.startPosition.row
+                  });
+                }
+              }
+            }
+            // Método decorado con @property → se expone como "campo" de tipo property.
+            else if (stmt.type === 'decorated_definition') {
+              const hasProperty = stmt.namedChildren.some(
+                c => c.type === 'decorator' && c.namedChildren[0]?.text === 'property'
+              );
+              const def = stmt.childForFieldName('definition');
+              if (hasProperty && def && def.type === 'function_definition') {
+                const methodName = def.childForFieldName('name');
+                if (methodName) {
+                  model.fields!.push({
+                    name: methodName.text,
+                    fieldType: 'property',
+                    lineNumber: def.startPosition.row,
+                    isProperty: true
+                  });
                 }
               }
             }
           }
         }
+        models.push(model);
       }
-
-      // Expresión regular para encontrar el inicio de una clase
-      const classRegex = /^class\s+(\w+)\s*\(/;
-      // Expresión regular para encontrar el inicio de la clase Meta
-      const metaClassRegex = /^\s+class\s+Meta\s*:/;
-      // Expresión regular para detectar decoradores @property
-      const propertyDecoratorRegex = /^\s*@property\s*$/;
-
-      let currentModel: DjangoModel | null = null;
-      let inModelDefinition = false;
-      let inMetaClass = false;
-      let classIndentation = 0;
-      let metaIndentation = 0; // Indentación de la línea `class Meta:`
-      let fieldStartIndentation = 0;
-      let currentFieldName = '';
-      let currentFieldType = '';
-      let currentFieldLine = 0;
-      let parenthesesCount = 0; // Para rastrear paréntesis abiertos/cerrados
-      let isPropertyMethod = false; // Para rastrear si el próximo método tiene el decorador @property
-
-      // Patrones de campo compilados UNA sola vez (no dependen de la línea).
-      // El último grupo captura el paréntesis de apertura (`\(?` dentro del grupo)
-      // para que el conteo de paréntesis cuente tanto `(` como `)`. El tipo de campo
-      // es siempre el grupo 2 tanto en patrones con prefijo como en importación directa.
-      const fieldPatterns: RegExp[] = [
-        new RegExp(`^\\s+(\\w+)\\s*=\\s*models\\.(\\w+)\\s*(\\(?.*)`)
-      ];
-      if (importAliases['models']) {
-        fieldPatterns.push(new RegExp(`^\\s+(\\w+)\\s*=\\s*${importAliases['models']}\\.(\\w+)\\s*(\\(?.*)`));
-      }
-      if (directImports.length > 0) {
-        const directImportsPattern = directImports.map(escapeRegExp).join('|');
-        fieldPatterns.push(new RegExp(`^\\s+(\\w+)\\s*=\\s*(${directImportsPattern})\\s*(\\(?.*)`));
-      }
-
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const indentMatch = line.match(/^(\s*)/);
-        const indentation = indentMatch ? indentMatch[1].length : 0;
-
-        // Detectar decorador @property
-        if (line.trim().match(propertyDecoratorRegex)) {
-          isPropertyMethod = true;
-          continue;
-        }
-
-        // Detectar una nueva clase
-        const classMatch = line.match(classRegex);
-        if (classMatch && modelClasses.has(classMatch[1])) {
-          // Guardar el modelo anterior si existe
-          if (currentModel) {
-            models.push(currentModel);
-          }
-
-          // Crear un nuevo modelo
-          currentModel = {
-            name: classMatch[1],
-            lineNumber: i,
-            fields: []
-          };
-
-          // Iniciar el seguimiento de la definición del modelo
-          inModelDefinition = true;
-          inMetaClass = false;
-          classIndentation = indentation;
-          isPropertyMethod = false;
-          continue;
-        }
-
-        // Si no estamos dentro de un modelo, continuar
-        if (!currentModel || !inModelDefinition) {
-          isPropertyMethod = false;
-          continue;
-        }
-
-        // Si es una línea vacía, continuar
-        if (line.trim() === '') {
-          continue;
-        }
-
-        // Detectar si estamos entrando en la clase Meta
-        if (line.match(metaClassRegex)) {
-          inMetaClass = true;
-          metaIndentation = indentation;
-          isPropertyMethod = false;
-          continue;
-        }
-
-        // Salir de la clase Meta al volver a un nivel de indentación igual o menor
-        // al de `class Meta:` (p. ej. un campo declarado tras Meta, caso #11).
-        // Antes inMetaClass solo se reseteaba al cambiar de clase, perdiendo esos campos.
-        if (inMetaClass && line.trim() !== '' && indentation <= metaIndentation) {
-          inMetaClass = false;
-        }
-
-        // Si la indentación es menor o igual a la de la clase, hemos salido del modelo
-        if (indentation <= classIndentation && line.trim() !== '') {
-          // Guardar el modelo actual
-          models.push(currentModel);
-          currentModel = null;
-          inModelDefinition = false;
-          inMetaClass = false;
-          isPropertyMethod = false;
-          continue;
-        }
-
-        // Ignorar líneas dentro de la clase Meta
-        if (inMetaClass) {
-          continue;
-        }
-
-        // Detectar método con decorador @property
-        const methodMatch = line.match(/^\s+def\s+(\w+)\s*\(/);
-        if (isPropertyMethod && methodMatch) {
-          currentModel.fields!.push({
-            name: methodMatch[1],
-            fieldType: 'property',
-            lineNumber: i,
-            isProperty: true
-          });
-          isPropertyMethod = false;
-          continue;
-        }
-
-        // Construir expresión regular para detectar campos considerando alias e importaciones directas
-        // Intentar cada patrón (ya compilados fuera del bucle)
-        let fieldMatch: RegExpMatchArray | null = null;
-        for (const regex of fieldPatterns) {
-          const match = line.match(regex);
-          if (match) {
-            fieldMatch = match;
-            break;
-          }
-        }
-
-        if (fieldMatch) {
-          // Si estábamos procesando un campo anterior, añadirlo al modelo
-          if (currentFieldName && currentFieldType) {
-            currentModel.fields!.push({
-              name: currentFieldName,
-              fieldType: currentFieldType,
-              lineNumber: currentFieldLine
-            });
-          }
-
-          // Iniciar el seguimiento de un nuevo campo. El tipo es siempre el grupo 2.
-          currentFieldName = fieldMatch[1];
-          currentFieldType = fieldMatch[2];
-          currentFieldLine = i;
-          fieldStartIndentation = indentation;
-
-          // Contar paréntesis abiertos y cerrados en esta línea
-          const openParens = (fieldMatch[fieldMatch.length - 1].match(/\(/g) || []).length;
-          const closeParens = (fieldMatch[fieldMatch.length - 1].match(/\)/g) || []).length;
-          parenthesesCount = openParens - closeParens;
-
-          // Si los paréntesis están equilibrados, el campo está completo en esta línea
-          if (parenthesesCount === 0) {
-            currentModel.fields!.push({
-              name: currentFieldName,
-              fieldType: currentFieldType,
-              lineNumber: currentFieldLine
-            });
-            currentFieldName = '';
-            currentFieldType = '';
-          }
-        }
-        // Continuación de un campo de múltiples líneas
-        else if (currentFieldName && currentFieldType && parenthesesCount > 0) {
-          // Contar paréntesis en esta línea
-          const openParens = (line.match(/\(/g) || []).length;
-          const closeParens = (line.match(/\)/g) || []).length;
-          parenthesesCount += openParens - closeParens;
-
-          // Si los paréntesis están equilibrados, el campo está completo
-          if (parenthesesCount === 0) {
-            currentModel.fields!.push({
-              name: currentFieldName,
-              fieldType: currentFieldType,
-              lineNumber: currentFieldLine
-            });
-            currentFieldName = '';
-            currentFieldType = '';
-          }
-        }
-        // Nueva línea con la misma indentación que el nivel de campo, pero no es continuación
-        else if (indentation === fieldStartIndentation && !line.trim().startsWith('#')) {
-          // Verificar si es un nuevo campo con cualquier formato no capturado anteriormente
-          const otherFieldRegex = /^\s+(\w+)\s*=\s*(\w+)(?:\.(\w+))?\s*(\(?.*)/;
-          const otherFieldMatch = line.match(otherFieldRegex);
-
-          if (otherFieldMatch) {
-            // Si estábamos procesando un campo anterior, añadirlo al modelo
-            if (currentFieldName && currentFieldType) {
-              currentModel.fields!.push({
-                name: currentFieldName,
-                fieldType: currentFieldType,
-                lineNumber: currentFieldLine
-              });
-            }
-
-            // Iniciar el seguimiento de un nuevo campo
-            currentFieldName = otherFieldMatch[1];
-            // El tipo de campo puede ser con o sin prefijo
-            currentFieldType = otherFieldMatch[3] || otherFieldMatch[2];
-            currentFieldLine = i;
-
-            // Contar paréntesis abiertos y cerrados en esta línea
-            const openParens = (otherFieldMatch[4].match(/\(/g) || []).length;
-            const closeParens = (otherFieldMatch[4].match(/\)/g) || []).length;
-            parenthesesCount = openParens - closeParens;
-
-            // Si los paréntesis están equilibrados, el campo está completo en esta línea
-            if (parenthesesCount === 0) {
-              currentModel.fields!.push({
-                name: currentFieldName,
-                fieldType: currentFieldType,
-                lineNumber: currentFieldLine
-              });
-              currentFieldName = '';
-              currentFieldType = '';
-            }
-          }
-        }
-      }
-
-      // Añadir el último campo si existe
-      if (currentFieldName && currentFieldType && currentModel) {
-        currentModel.fields!.push({
-          name: currentFieldName,
-          fieldType: currentFieldType,
-          lineNumber: currentFieldLine
-        });
-      }
-
-      // Añadir el último modelo si existe
-      if (currentModel) {
-        models.push(currentModel);
-      }
-
     } catch (error) {
       reportError('Error al analizar modelos', error);
     }
@@ -686,45 +366,55 @@ export class DjangoProjectAnalyzer {
     const views: DjangoView[] = [];
 
     try {
-      const content = this.stripComments(await readFile(viewsPath, 'utf8'));
-      const lines = content.split('\n');
+      await initPythonParser();
+      const content = await readFile(viewsPath, 'utf8');
+      const root = parsePython(content).rootNode;
 
-      // Expresión regular para encontrar funciones de vista
-      const functionViewRegex = /^def\s+(\w+)\s*\(/;
-      // Clase de vista, capturando las clases base para distinguir DRF.
-      const classViewRegex = /^class\s+(\w+)\s*\(([^)]*)\)?/;
-      // Decorador de nivel superior (sin indentar): captura el nombre tras `@`,
-      // descartando el módulo y los argumentos (p. ej. @auth.login_required(...)).
-      const decoratorRegex = /^@([\w.]+)/;
-      // Decoradores acumulados a la espera de la def/class que decoran.
-      let pendingDecorators: string[] = [];
-
-      for (let i = 0; i < lines.length; i++) {
-        const decoratorMatch = lines[i].match(decoratorRegex);
-        if (decoratorMatch) {
-          pendingDecorators.push(decoratorMatch[1].split('.').pop() as string);
-          continue;
+      for (const node of root.namedChildren) {
+        // Una def/class puede venir envuelta en `decorated_definition`: en ese
+        // caso los decoradores son hijos `decorator` y la def/class real está en
+        // el campo `definition`. El AST ya asocia los decoradores a SU def, así
+        // que no hay arrastre a definiciones posteriores (a diferencia del regex).
+        let decorators: string[] | undefined;
+        let def = node;
+        if (node.type === 'decorated_definition') {
+          decorators = node.namedChildren
+            .filter(c => c.type === 'decorator')
+            .map(c => this.decoratorName(c))
+            .filter((n): n is string => !!n);
+          const inner = node.childForFieldName('definition');
+          if (!inner) {
+            continue;
+          }
+          def = inner;
         }
 
-        const functionMatch = lines[i].match(functionViewRegex);
-        if (functionMatch) {
-          views.push({
-            name: functionMatch[1],
-            lineNumber: i,
-            isClass: false,
-            decorators: pendingDecorators.length ? pendingDecorators : undefined
-          });
-          pendingDecorators = [];
-          continue;
-        }
-
-        const classMatch = lines[i].match(classViewRegex);
-        if (classMatch) {
+        if (def.type === 'function_definition') {
+          const nameNode = def.childForFieldName('name');
+          if (nameNode) {
+            views.push({
+              name: nameNode.text,
+              lineNumber: nameNode.startPosition.row,
+              isClass: false,
+              decorators: decorators && decorators.length ? decorators : undefined
+            });
+          }
+        } else if (def.type === 'class_definition') {
+          const nameNode = def.childForFieldName('name');
+          if (!nameNode) {
+            continue;
+          }
           // Clasificar como DRF según la clase base: *ViewSet (routers) o
           // *APIView / *GenericAPIView (APIView y vistas genéricas).
-          const bases = (classMatch[2] || '')
-            .split(',')
-            .map(b => (b.trim().split('.').pop() || '').trim());
+          const bases: string[] = [];
+          const supers = def.childForFieldName('superclasses');
+          if (supers) {
+            for (const arg of supers.namedChildren) {
+              if (arg.type === 'identifier' || arg.type === 'attribute') {
+                bases.push(finalSegment(arg.text));
+              }
+            }
+          }
           let apiKind: 'viewset' | 'apiview' | undefined;
           if (bases.some(b => /ViewSet$/.test(b))) {
             apiKind = 'viewset';
@@ -733,20 +423,12 @@ export class DjangoProjectAnalyzer {
           }
 
           views.push({
-            name: classMatch[1],
-            lineNumber: i,
+            name: nameNode.text,
+            lineNumber: nameNode.startPosition.row,
             isClass: true,
             apiKind,
-            decorators: pendingDecorators.length ? pendingDecorators : undefined
+            decorators: decorators && decorators.length ? decorators : undefined
           });
-          pendingDecorators = [];
-          continue;
-        }
-
-        // Cualquier otra línea no vacía rompe la cadena de decoradores
-        // pendientes (evita arrastrarlos hasta una def/class posterior).
-        if (lines[i].trim() !== '') {
-          pendingDecorators = [];
         }
       }
     } catch (error) {
@@ -754,6 +436,22 @@ export class DjangoProjectAnalyzer {
     }
 
     return views;
+  }
+
+  /**
+   * Devuelve el nombre "limpio" de un nodo `decorator` del AST: descarta el
+   * módulo y los argumentos. Ejemplos: `@login_required` → `login_required`,
+   * `@auth.permission_required(...)` → `permission_required`,
+   * `@app.task` → `task`. Devuelve undefined si no se puede resolver.
+   */
+  private decoratorName(decorator: SyntaxNode): string | undefined {
+    const expr = decorator.namedChildren[0];
+    if (!expr) {
+      return undefined;
+    }
+    // `@foo(...)` es un `call`; el nombre está en su campo `function`.
+    const target = expr.type === 'call' ? expr.childForFieldName('function') : expr;
+    return target ? finalSegment(target.text) : undefined;
   }
 
   /**
@@ -776,102 +474,82 @@ export class DjangoProjectAnalyzer {
     visited.add(canonicalPath);
 
     try {
-      const content = this.stripComments(await readFile(urlsPath, 'utf8'));
-      const lines = content.split('\n');
+      await initPythonParser();
+      const content = await readFile(urlsPath, 'utf8');
+      const root = parsePython(content).rootNode;
 
-      // Expresiones regulares para encontrar patrones de URL
-      // `r?` admite raw strings (r'...'/r"...") en re_path()/url() (caso #9).
-      // `[^'"]*` admite el patron vacio de la raiz del sitio: path('').
-      const pathRegex = /path\s*\(\s*r?['"]([^'"]*)['"]\s*,\s*(\w+(?:\.\w+)*)/;
-      const rePathRegex = /re_path\s*\(\s*r?['"]([^'"]*)['"]\s*,\s*(\w+(?:\.\w+)*)/;
-      const urlRegex = /url\s*\(\s*r?['"]([^'"]*)['"]\s*,\s*(\w+(?:\.\w+)*)/;
-
-      // Expresión regular para encontrar includes
-      const includeRegex = /include\s*\(\s*['"]([^'"]+)['"]\s*(?:,\s*['"]([^'"]+)['"]\s*)?\)/;
-
-      // Routers DRF: router.register(r'prefix', SomeViewSet[, ...]) (caso DRF/#12).
-      const routerRegex = /\brouter\.register\s*\(\s*r?['"]([^'"]*)['"]\s*,\s*(\w+(?:\.\w+)*)/;
-      // Detecta el inicio de una llamada path()/re_path()/url() para unir continuaciones.
-      const urlCallStartRegex = /\b(?:re_path|path|url)\s*\(/;
-
-      for (let i = 0; i < lines.length; i++) {
-        // Unir continuaciones cuando una llamada path()/re_path()/url() abre
-        // paréntesis sin cerrarlos en la misma línea (definiciones multilínea).
-        let logicalLine = lines[i];
-        const startLine = i;
-        if (urlCallStartRegex.test(logicalLine)) {
-          let parenDepth =
-            (logicalLine.match(/\(/g) || []).length - (logicalLine.match(/\)/g) || []).length;
-          let j = i;
-          while (parenDepth > 0 && j + 1 < lines.length) {
-            j++;
-            logicalLine += ' ' + lines[j].trim();
-            parenDepth +=
-              (lines[j].match(/\(/g) || []).length - (lines[j].match(/\)/g) || []).length;
-          }
-          i = j; // saltar las líneas ya consumidas
+      // Recolectar TODAS las llamadas del árbol en orden de aparición. El AST
+      // ignora de forma natural los comentarios y une las continuaciones
+      // multilínea, así que ya no hace falta el "logical line" ni stripComments.
+      const calls: SyntaxNode[] = [];
+      const collect = (node: SyntaxNode): void => {
+        if (node.type === 'call') {
+          calls.push(node);
         }
+        for (const child of node.namedChildren) {
+          collect(child);
+        }
+      };
+      collect(root);
 
-        // Buscar patrones de URL directos
-        let match = logicalLine.match(pathRegex) || logicalLine.match(rePathRegex) || logicalLine.match(urlRegex);
-        if (match) {
-          const pattern = prefix + match[1];
-          urls.push({
-            pattern: pattern,
-            viewName: match[2],
-            lineNumber: startLine
-          });
+      // Nombre punteado de una vista: `views.home` tal cual; para una CBV
+      // `views.AboutView.as_view()` se usa el objeto de la llamada.
+      const dottedName = (node: SyntaxNode): string =>
+        node.type === 'call' ? (node.childForFieldName('function')?.text ?? node.text) : node.text;
+
+      for (const call of calls) {
+        const fn = call.childForFieldName('function');
+        if (!fn) {
+          continue;
+        }
+        const fnName = finalSegment(fn.text);
+
+        // path()/re_path()/url(): primer argumento string = patrón, segundo = vista.
+        if (fnName === 'path' || fnName === 're_path' || fnName === 'url') {
+          const pos = this.positionalArgs(call);
+          const patternNode = pos[0];
+          if (!patternNode || patternNode.type !== 'string') {
+            continue;
+          }
+          const viewNode = pos[1];
+
+          // Si el segundo argumento es include(...), es un include, no una ruta.
+          if (
+            viewNode &&
+            viewNode.type === 'call' &&
+            finalSegment(viewNode.childForFieldName('function')?.text ?? '') === 'include'
+          ) {
+            // El prefijo de las rutas incluidas es el patrón de ESTE path()
+            // (p. ej. 'blog/'), combinado con el prefijo heredado.
+            const includePrefix = prefix + this.stringLiteralValue(patternNode);
+            await this.resolveInclude(viewNode, urlsPath, includePrefix, visited, urls);
+            continue;
+          }
+
+          if (viewNode) {
+            urls.push({
+              pattern: prefix + this.stringLiteralValue(patternNode),
+              viewName: dottedName(viewNode),
+              lineNumber: call.startPosition.row
+            });
+          }
           continue;
         }
 
-        // Buscar registros de routers DRF (router.register).
-        const routerMatch = logicalLine.match(routerRegex);
-        if (routerMatch) {
-          urls.push({
-            pattern: prefix + routerMatch[1],
-            viewName: routerMatch[2],
-            lineNumber: startLine
-          });
-          continue;
-        }
-
-        // Buscar includes
-        const includeMatch = logicalLine.match(includeRegex);
-        if (includeMatch) {
-          const includedModule = includeMatch[1];
-          const includePrefix = includeMatch[2] || '';
-
-          // Determinar la ruta del archivo incluido
-          let includedFilePath = '';
-          if (includedModule.endsWith('.urls')) {
-            // Convertir formato de módulo a ruta de archivo
-            const parts = includedModule.split('.');
-            const appName = parts[0];
-
-            // Buscar la aplicación en el proyecto
-            const projectRoot = path.dirname(path.dirname(urlsPath));
-            const appPath = path.resolve(projectRoot, appName);
-
-            // Evitar path traversal: el nombre de app viene de include('...') en
-            // un archivo analizado, así que se exige que la ruta resuelta quede
-            // dentro del proyecto (descarta '..', rutas absolutas, etc.).
-            const withinProject =
-              appPath === projectRoot || appPath.startsWith(projectRoot + path.sep);
-
-            if (withinProject && await pathExists(appPath)) {
-              includedFilePath = path.join(appPath, 'urls.py');
-            }
-          }
-
-          if (includedFilePath && await pathExists(includedFilePath)) {
-            // Combinar prefijos
-            const newPrefix = prefix + (includePrefix ? includePrefix : '');
-
-            // Extraer URLs del archivo incluido con el prefijo actualizado
-            const includedUrls = await this.extractUrls(includedFilePath, newPrefix, visited);
-            urls.push(...includedUrls);
+        // Routers DRF: router.register(r'prefix', SomeViewSet[, ...]) (caso #12).
+        if (fnName === 'register' && fn.type === 'attribute') {
+          const pos = this.positionalArgs(call);
+          const patternNode = pos[0];
+          const viewNode = pos[1];
+          if (patternNode && patternNode.type === 'string' && viewNode) {
+            urls.push({
+              pattern: prefix + this.stringLiteralValue(patternNode),
+              viewName: dottedName(viewNode),
+              lineNumber: call.startPosition.row
+            });
           }
         }
+        // Los include(...) sueltos se procesan vía su path() contenedor (arriba).
       }
     } catch (error) {
       reportError('Error al analizar URLs', error);
@@ -881,79 +559,283 @@ export class DjangoProjectAnalyzer {
   }
 
   /**
+   * Resuelve un include('app.urls'[, 'namespace']) del AST: localiza el urls.py
+   * de la app (con protección anti path-traversal) y recursa para anexar sus
+   * rutas con el prefijo combinado. El set `visited` corta includes circulares.
+   */
+  private async resolveInclude(
+    includeCall: SyntaxNode,
+    urlsPath: string,
+    prefix: string,
+    visited: Set<string>,
+    urls: DjangoUrl[]
+  ): Promise<void> {
+    const inclPos = this.positionalArgs(includeCall);
+    const moduleNode = inclPos[0];
+    if (!moduleNode || moduleNode.type !== 'string') {
+      return;
+    }
+    const includedModule = this.stringLiteralValue(moduleNode);
+
+    if (!includedModule.endsWith('.urls')) {
+      return;
+    }
+    const appName = includedModule.split('.')[0];
+    const projectRoot = path.dirname(path.dirname(urlsPath));
+    const appPath = path.resolve(projectRoot, appName);
+
+    // Evitar path traversal: el nombre de app viene de include('...') en un
+    // archivo analizado, así que se exige que la ruta resuelta quede dentro del
+    // proyecto (descarta '..', rutas absolutas, etc.).
+    const withinProject =
+      appPath === projectRoot || appPath.startsWith(projectRoot + path.sep);
+    if (!withinProject || !(await pathExists(appPath))) {
+      return;
+    }
+
+    const includedFilePath = path.join(appPath, 'urls.py');
+    if (await pathExists(includedFilePath)) {
+      // `prefix` ya incluye el patrón del path() contenedor; el 2º argumento de
+      // include() es el namespace de la app, no una ruta, así que no se añade.
+      const includedUrls = await this.extractUrls(includedFilePath, prefix, visited);
+      urls.push(...includedUrls);
+    }
+  }
+
+  /**
+   * Valor "interno" de un literal de cadena del AST: descarta el prefijo
+   * (r/b/u/f y combinaciones) y las comillas (simples, dobles o triples).
+   * Ejemplos: `r'^a/$'` → `^a/$`, `''` → ``, `"""x"""` → `x`.
+   */
+  private stringLiteralValue(node: SyntaxNode): string {
+    const match = node.text.match(/^[rbuf]*('''|"""|'|")([\s\S]*)\1$/i);
+    return match ? match[2] : node.text;
+  }
+
+  /**
+   * Devuelve las definiciones de clase de nivel superior del módulo, ya estén
+   * desnudas (`class X(...)`) o envueltas en un `decorated_definition`.
+   */
+  private topLevelClassDefs(root: SyntaxNode): SyntaxNode[] {
+    const result: SyntaxNode[] = [];
+    for (const node of root.namedChildren) {
+      if (node.type === 'class_definition') {
+        result.push(node);
+      } else if (node.type === 'decorated_definition') {
+        const def = node.childForFieldName('definition');
+        if (def && def.type === 'class_definition') {
+          result.push(def);
+        }
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Nombres "finales" de las clases base de una clase (sin módulo):
+   * `serializers.ModelSerializer` → `ModelSerializer`.
+   */
+  private classBaseNames(classNode: SyntaxNode): string[] {
+    const supers = classNode.childForFieldName('superclasses');
+    if (!supers) {
+      return [];
+    }
+    return supers.namedChildren
+      .filter(a => a.type === 'identifier' || a.type === 'attribute')
+      .map(a => finalSegment(a.text));
+  }
+
+  /**
+   * Busca `model = X` en el cuerpo de la clase (típicamente dentro de
+   * `class Meta:`) y devuelve el nombre del modelo, o undefined si no hay.
+   */
+  private findMetaModel(classNode: SyntaxNode): string | undefined {
+    const search = (block: SyntaxNode | null): string | undefined => {
+      if (!block) {
+        return undefined;
+      }
+      for (const child of block.namedChildren) {
+        if (child.type === 'expression_statement') {
+          const assignment = child.namedChildren[0];
+          if (assignment && assignment.type === 'assignment') {
+            const left = assignment.childForFieldName('left');
+            const right = assignment.childForFieldName('right');
+            if (left && left.text === 'model' && right) {
+              return right.text;
+            }
+          }
+        } else if (child.type === 'class_definition') {
+          const found = search(child.childForFieldName('body'));
+          if (found) {
+            return found;
+          }
+        }
+      }
+      return undefined;
+    };
+    return search(classNode.childForFieldName('body'));
+  }
+
+  /**
+   * Devuelve el valor de un argumento con nombre (`keyword=...`) de una llamada.
+   */
+  private keywordArg(call: SyntaxNode, name: string): SyntaxNode | undefined {
+    const args = call.childForFieldName('arguments');
+    if (!args) {
+      return undefined;
+    }
+    for (const a of args.namedChildren) {
+      if (a.type === 'keyword_argument' && a.childForFieldName('name')?.text === name) {
+        return a.childForFieldName('value') ?? undefined;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Argumentos posicionales de una llamada (sin keyword= ni comentarios).
+   */
+  private positionalArgs(call: SyntaxNode): SyntaxNode[] {
+    const args = call.childForFieldName('arguments');
+    if (!args) {
+      return [];
+    }
+    return args.namedChildren.filter(a => a.type !== 'keyword_argument' && a.type !== 'comment');
+  }
+
+  /**
+   * Valores de cadena de un literal de lista (`["GET", "POST"]` → ['GET','POST']).
+   */
+  private stringListValues(node: SyntaxNode | undefined): string[] {
+    if (!node || node.type !== 'list') {
+      return [];
+    }
+    return node.namedChildren.filter(e => e.type === 'string').map(e => this.stringLiteralValue(e));
+  }
+
+  /**
    * Extrae las clases de admin de un archivo admin.py
    */
   async extractAdminClasses(adminPath: string): Promise<DjangoAdminClass[]> {
     const adminClasses: DjangoAdminClass[] = [];
 
     try {
-      const content = this.stripComments(await readFile(adminPath, 'utf8'));
-      const lineOf = (index: number): number =>
-        content.substring(0, index).split('\n').length - 1;
+      await initPythonParser();
+      const content = await readFile(adminPath, 'utf8');
+      const root = parsePython(content).rootNode;
 
       // Clases ya asociadas a un modelo vía decorador, para no duplicarlas
       // en el escaneo de clases.
       const decoratedClasses = new Set<string>();
 
-      // Decoradores @admin.register(A, B, ...): admite varios modelos y
-      // decoradores apilados antes de la clase (se busca la primera `class` posterior).
-      const decoratorRegex = /@admin\.register\s*\(([^)]*)\)/g;
-      let decoratorMatch: RegExpExecArray | null;
-      while ((decoratorMatch = decoratorRegex.exec(content)) !== null) {
-        const models = decoratorMatch[1]
-          .split(',')
-          .map(m => m.trim())
-          .filter(Boolean);
-        const classAfter = content.substring(decoratorMatch.index).match(/\bclass\s+(\w+)\s*\(/);
-        if (classAfter && models.length > 0) {
-          decoratedClasses.add(classAfter[1]);
+      // Busca `model = X` en el cuerpo de una clase y devuelve el nombre del modelo.
+      const findModelAttr = (classNode: SyntaxNode): string => {
+        const body = classNode.childForFieldName('body');
+        if (!body) {
+          return '';
+        }
+        for (const stmt of body.namedChildren) {
+          if (stmt.type !== 'expression_statement') {
+            continue;
+          }
+          const assignment = stmt.namedChildren[0];
+          if (assignment && assignment.type === 'assignment') {
+            const left = assignment.childForFieldName('left');
+            const right = assignment.childForFieldName('right');
+            if (left && left.text === 'model' && right) {
+              return right.text;
+            }
+          }
+        }
+        return '';
+      };
+
+      const isAdminBase = (baseFullText: string): boolean => {
+        const baseName = finalSegment(baseFullText);
+        return /Admin$/.test(baseName) || baseName === 'TabularInline' || baseName === 'StackedInline';
+      };
+
+      // 1) Clases decoradas con @admin.register(A, B, ...): admite varios modelos.
+      for (const node of root.namedChildren) {
+        if (node.type !== 'decorated_definition') {
+          continue;
+        }
+        const def = node.childForFieldName('definition');
+        if (!def || def.type !== 'class_definition') {
+          continue;
+        }
+        const registerDec = node.namedChildren.find(
+          c =>
+            c.type === 'decorator' &&
+            c.namedChildren[0]?.type === 'call' &&
+            c.namedChildren[0]?.childForFieldName('function')?.text === 'admin.register'
+        );
+        if (!registerDec) {
+          continue;
+        }
+        const nameNode = def.childForFieldName('name');
+        const callArgs = registerDec.namedChildren[0].childForFieldName('arguments');
+        const models = callArgs
+          ? callArgs.namedChildren
+              .filter(a => a.type !== 'keyword_argument' && a.type !== 'comment')
+              .map(a => a.text)
+          : [];
+        if (nameNode && models.length > 0) {
+          decoratedClasses.add(nameNode.text);
           adminClasses.push({
-            name: classAfter[1],
-            lineNumber: lineOf(decoratorMatch.index),
+            name: nameNode.text,
+            lineNumber: node.startPosition.row,
             modelName: models.join(', ')
           });
         }
       }
 
-      // Clases de admin declaradas: ModelAdmin, inlines o herencia custom (*Admin).
-      const classRegex = /class\s+(\w+)\s*\(\s*([\w.]+)\s*\)/g;
-      let classMatch: RegExpExecArray | null;
-      while ((classMatch = classRegex.exec(content)) !== null) {
-        const className = classMatch[1];
-        const baseName = classMatch[2].split('.').pop() || classMatch[2];
-        const isAdminBase =
-          /Admin$/.test(baseName) ||
-          baseName === 'TabularInline' ||
-          baseName === 'StackedInline';
-        if (!isAdminBase || decoratedClasses.has(className)) {
+      // 2) Clases de admin declaradas: ModelAdmin, inlines o herencia custom (*Admin).
+      for (const node of root.namedChildren) {
+        if (node.type !== 'class_definition') {
           continue;
         }
-
-        // Buscar `model = X` SOLO dentro del cuerpo de esta clase (hasta el
-        // siguiente `class` en columna 0 o el final del archivo), no en todo el resto.
-        const restAfter = content.substring(classMatch.index + classMatch[0].length);
-        const nextClass = restAfter.search(/\nclass\s/);
-        const body = nextClass >= 0 ? restAfter.substring(0, nextClass) : restAfter;
-        const modelMatch = body.match(/\bmodel\s*=\s*(\w+)/);
-
+        const nameNode = node.childForFieldName('name');
+        if (!nameNode || decoratedClasses.has(nameNode.text)) {
+          continue;
+        }
+        const supers = node.childForFieldName('superclasses');
+        const bases = supers
+          ? supers.namedChildren.filter(a => a.type === 'identifier' || a.type === 'attribute').map(a => a.text)
+          : [];
+        if (!bases.some(isAdminBase)) {
+          continue;
+        }
         adminClasses.push({
-          name: className,
-          lineNumber: lineOf(classMatch.index),
-          modelName: modelMatch ? modelMatch[1] : ''
+          name: nameNode.text,
+          lineNumber: nameNode.startPosition.row,
+          modelName: findModelAttr(node)
         });
       }
 
-      // Registros directos: admin.site.register(Model, AdminClass?).
-      const registerRegex = /admin\.site\.register\s*\(\s*(\w+)(?:\s*,\s*(\w+))?\s*\)/g;
-      let registerMatch: RegExpExecArray | null;
-      while ((registerMatch = registerRegex.exec(content)) !== null) {
-        adminClasses.push({
-          name: registerMatch[2] || 'ModelAdmin',
-          lineNumber: lineOf(registerMatch.index),
-          modelName: registerMatch[1]
-        });
-      }
-
+      // 3) Registros directos: admin.site.register(Model, AdminClass?).
+      const collectRegisters = (node: SyntaxNode): void => {
+        if (
+          node.type === 'call' &&
+          node.childForFieldName('function')?.text === 'admin.site.register'
+        ) {
+          const args = node.childForFieldName('arguments');
+          const pos = args
+            ? args.namedChildren.filter(a => a.type !== 'keyword_argument' && a.type !== 'comment')
+            : [];
+          if (pos[0]) {
+            adminClasses.push({
+              name: pos[1]?.text || 'ModelAdmin',
+              lineNumber: node.startPosition.row,
+              modelName: pos[0].text
+            });
+          }
+        }
+        for (const child of node.namedChildren) {
+          collectRegisters(child);
+        }
+      };
+      collectRegisters(root);
     } catch (error) {
       reportError('Error al analizar clases de admin', error);
     }
@@ -968,57 +850,38 @@ export class DjangoProjectAnalyzer {
     const settings: DjangoSetting[] = [];
 
     try {
-      // stripComments neutraliza comentarios (`#` y bloques `"""`) respetando las
-      // cadenas, así que aquí ya no hace falta recortar comentarios a mano.
-      const content = this.stripComments(await readFile(settingsPath, 'utf8'));
-      const lines = content.split('\n');
+      await initPythonParser();
+      const content = await readFile(settingsPath, 'utf8');
+      const root = parsePython(content).rootNode;
 
-      // Expresión regular para encontrar definiciones de variables
-      const settingRegex = /^([A-Z_][A-Z0-9_]*)\s*=\s*(.+)$/;
+      // Un setting es una asignación de nivel superior cuyo nombre va en
+      // MAYÚSCULAS (convención Django). El AST captura el valor completo —
+      // incluidos dicts/listas multilínea anidados— sin contar brackets a mano,
+      // e ignora de forma natural comentarios y docstrings (no son asignaciones).
+      const isSettingName = /^[A-Z_][A-Z0-9_]*$/;
 
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-
-        // Ignorar líneas vacías (los comentarios ya quedaron en blanco).
-        if (line === '') {
+      for (const node of root.namedChildren) {
+        if (node.type !== 'expression_statement') {
+          continue;
+        }
+        const assignment = node.namedChildren[0];
+        if (!assignment || assignment.type !== 'assignment') {
+          continue;
+        }
+        const left = assignment.childForFieldName('left');
+        const right = assignment.childForFieldName('right');
+        if (!left || left.type !== 'identifier' || !isSettingName.test(left.text) || !right) {
           continue;
         }
 
-        const match = line.match(settingRegex);
-        if (match) {
-          const startLine = i; // línea donde se declara el nombre del setting
-          let value = match[2].trim();
-
-          // Manejar valores multilínea contando el BALANCE de brackets (corchetes,
-          // llaves y paréntesis). Antes se cortaba en el primer cierre encontrado, lo
-          // que rompía estructuras anidadas como DATABASES = { "default": { ... } }.
-          const countOpen = (s: string): number => (s.match(/[[{(]/g) || []).length;
-          const countClose = (s: string): number => (s.match(/[\]})]/g) || []).length;
-          let depth = countOpen(value) - countClose(value);
-
-          if (depth > 0) {
-            let j = i + 1;
-            let multilineValue = value;
-
-            while (j < lines.length && depth > 0) {
-              const nextLine = lines[j].trim();
-              multilineValue += ' ' + nextLine;
-              depth += countOpen(nextLine) - countClose(nextLine);
-              j++;
-            }
-
-            value = multilineValue;
-            // Avanzar el índice para no re-escanear las líneas de continuación
-            // ya consumidas (evita settings fantasma y trabajo duplicado).
-            i = j - 1;
-          }
-
-          settings.push({
-            name: match[1],
-            value: value,
-            lineNumber: startLine
-          });
-        }
+        // Colapsar la indentación/saltos de los valores multilínea a una sola
+        // línea, como hacía la versión anterior (mejor presentación en el árbol).
+        const value = right.text.replace(/\s+/g, ' ').trim();
+        settings.push({
+          name: left.text,
+          value,
+          lineNumber: left.startPosition.row
+        });
       }
     } catch (error) {
       reportError('Error al analizar settings', error);
@@ -1039,20 +902,29 @@ export class DjangoProjectAnalyzer {
     const tasks: DjangoTask[] = [];
 
     try {
-      const content = this.stripComments(await readFile(tasksPath, 'utf8'));
-      const lines = content.split('\n');
+      await initPythonParser();
+      const content = await readFile(tasksPath, 'utf8');
+      const root = parsePython(content).rootNode;
 
       // Nombres de decorador que corresponden a django.tasks.task (con o sin alias).
       const taskDecorators = new Set<string>();
-      for (const raw of lines) {
-        const importMatch = raw.trim().match(/^from\s+django\.tasks\s+import\s+(.+)$/);
-        if (importMatch) {
-          importMatch[1].split(',').forEach(part => {
-            const aliasMatch = part.trim().match(/^task(?:\s+as\s+(\w+))?$/);
-            if (aliasMatch) {
-              taskDecorators.add(aliasMatch[1] || 'task');
+      for (const imp of root.namedChildren) {
+        if (imp.type !== 'import_from_statement') {
+          continue;
+        }
+        if (imp.childForFieldName('module_name')?.text !== 'django.tasks') {
+          continue;
+        }
+        for (const child of imp.namedChildren) {
+          if (child.type === 'dotted_name' && child.text === 'task') {
+            taskDecorators.add('task');
+          } else if (child.type === 'aliased_import') {
+            const original = child.childForFieldName('name')?.text;
+            const alias = child.childForFieldName('alias')?.text;
+            if (original === 'task' && alias) {
+              taskDecorators.add(alias);
             }
-          });
+          }
         }
       }
 
@@ -1061,35 +933,23 @@ export class DjangoProjectAnalyzer {
         return tasks;
       }
 
-      const decoratorRegex = /^@(\w+)\b/;
-      const defRegex = /^(?:async\s+)?def\s+(\w+)\s*\(/;
-      let pending = false;
-
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-
-        const decoratorMatch = line.match(decoratorRegex);
-        if (decoratorMatch) {
-          // Los decoradores pueden apilarse (@task + @otro): basta con que uno
-          // sea de django.tasks para marcar la siguiente función como tarea.
-          if (taskDecorators.has(decoratorMatch[1])) {
-            pending = true;
-          }
+      // Funciones decoradas con @task (o su alias): basta con que UNO de los
+      // decoradores apilados sea de django.tasks. Los `@task(...)` con argumentos
+      // también valen (el AST los representa como `call`).
+      for (const node of root.namedChildren) {
+        if (node.type !== 'decorated_definition') {
           continue;
         }
-
-        const defMatch = line.match(defRegex);
-        if (defMatch) {
-          if (pending) {
-            tasks.push({ name: defMatch[1], lineNumber: i });
-          }
-          pending = false;
+        const def = node.childForFieldName('definition');
+        if (!def || def.type !== 'function_definition') {
           continue;
         }
-
-        // Cualquier otra línea no vacía rompe la cadena decorador→def.
-        if (line !== '') {
-          pending = false;
+        const isTask = node.namedChildren.some(
+          c => c.type === 'decorator' && taskDecorators.has(this.decoratorName(c) ?? '')
+        );
+        const nameNode = def.childForFieldName('name');
+        if (isTask && nameNode) {
+          tasks.push({ name: nameNode.text, lineNumber: nameNode.startPosition.row });
         }
       }
     } catch (error) {
@@ -1154,35 +1014,19 @@ export class DjangoProjectAnalyzer {
     const serializers: DjangoSerializer[] = [];
 
     try {
-      const content = this.stripComments(await readFile(serializersPath, 'utf8'));
-      const lines = content.split('\n');
-      const classRegex = /^class\s+(\w+)\s*\(([^)]*)\)/;
+      await initPythonParser();
+      const root = parsePython(await readFile(serializersPath, 'utf8')).rootNode;
 
-      for (let i = 0; i < lines.length; i++) {
-        const match = lines[i].match(classRegex);
-        if (!match) {
+      for (const cls of this.topLevelClassDefs(root)) {
+        const nameNode = cls.childForFieldName('name');
+        if (!nameNode || !this.classBaseNames(cls).some(b => /Serializer$/.test(b))) {
           continue;
         }
-        const bases = match[2].split(',').map(b => (b.trim().split('.').pop() || '').trim());
-        if (!bases.some(b => /Serializer$/.test(b))) {
-          continue;
-        }
-
-        // Buscar `model = X` dentro del cuerpo de la clase (hasta la siguiente
-        // clase en columna 0), normalmente dentro de `class Meta:`.
-        let modelName: string | undefined;
-        for (let j = i + 1; j < lines.length; j++) {
-          if (/^class\s/.test(lines[j])) {
-            break;
-          }
-          const modelMatch = lines[j].match(/^\s+model\s*=\s*(\w+)/);
-          if (modelMatch) {
-            modelName = modelMatch[1];
-            break;
-          }
-        }
-
-        serializers.push({ name: match[1], lineNumber: i, modelName });
+        serializers.push({
+          name: nameNode.text,
+          lineNumber: nameNode.startPosition.row,
+          modelName: this.findMetaModel(cls)
+        });
       }
     } catch (error) {
       reportError('Error al analizar serializers', error);
@@ -1199,18 +1043,13 @@ export class DjangoProjectAnalyzer {
     const schemas: DjangoSchema[] = [];
 
     try {
-      const content = this.stripComments(await readFile(schemasPath, 'utf8'));
-      const lines = content.split('\n');
-      const classRegex = /^class\s+(\w+)\s*\(([^)]*)\)/;
+      await initPythonParser();
+      const root = parsePython(await readFile(schemasPath, 'utf8')).rootNode;
 
-      for (let i = 0; i < lines.length; i++) {
-        const match = lines[i].match(classRegex);
-        if (!match) {
-          continue;
-        }
-        const bases = match[2].split(',').map(b => (b.trim().split('.').pop() || '').trim());
-        if (bases.some(b => /Schema$/.test(b))) {
-          schemas.push({ name: match[1], lineNumber: i });
+      for (const cls of this.topLevelClassDefs(root)) {
+        const nameNode = cls.childForFieldName('name');
+        if (nameNode && this.classBaseNames(cls).some(b => /Schema$/.test(b))) {
+          schemas.push({ name: nameNode.text, lineNumber: nameNode.startPosition.row });
         }
       }
     } catch (error) {
@@ -1229,38 +1068,47 @@ export class DjangoProjectAnalyzer {
     const endpoints: DjangoApiEndpoint[] = [];
 
     try {
-      const content = this.stripComments(await readFile(apiPath, 'utf8'));
-      const lines = content.split('\n');
-      const decoratorRegex = /^@(\w+)\.(get|post|put|patch|delete)\s*\(/;
-      const defRegex = /^(?:async\s+)?def\s+(\w+)\s*\(/;
+      await initPythonParser();
+      const root = parsePython(await readFile(apiPath, 'utf8')).rootNode;
+      const httpMethods = new Set(['get', 'post', 'put', 'patch', 'delete']);
 
-      let pendingMethod: string | null = null;
-      let pendingPath = '';
-      let pendingLine = 0;
-
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-
-        const decoratorMatch = line.match(decoratorRegex);
-        if (decoratorMatch) {
-          pendingMethod = decoratorMatch[2].toUpperCase();
-          const pathMatch = line.match(/['"]([^'"]*)['"]/);
-          pendingPath = pathMatch ? pathMatch[1] : '';
-          pendingLine = i;
+      for (const node of root.namedChildren) {
+        if (node.type !== 'decorated_definition') {
+          continue;
+        }
+        const def = node.childForFieldName('definition');
+        if (!def || def.type !== 'function_definition') {
+          continue;
+        }
+        const nameNode = def.childForFieldName('name');
+        if (!nameNode) {
           continue;
         }
 
-        const defMatch = line.match(defRegex);
-        if (defMatch && pendingMethod) {
+        // Decorador @<objeto>.<método>("/ruta"): p. ej. @api.get("/items").
+        for (const dec of node.namedChildren) {
+          if (dec.type !== 'decorator') {
+            continue;
+          }
+          const call = dec.namedChildren[0];
+          const fn = call && call.type === 'call' ? call.childForFieldName('function') : null;
+          if (!fn || fn.type !== 'attribute') {
+            continue;
+          }
+          const method = fn.childForFieldName('attribute')?.text ?? '';
+          if (!httpMethods.has(method)) {
+            continue;
+          }
+          const first = this.positionalArgs(call)[0];
           endpoints.push({
-            method: pendingMethod,
-            path: pendingPath,
-            handler: defMatch[1],
-            lineNumber: pendingLine,
+            method: method.toUpperCase(),
+            path: first && first.type === 'string' ? this.stringLiteralValue(first) : '',
+            handler: nameNode.text,
+            lineNumber: dec.startPosition.row,
             framework: 'ninja',
             filePath: apiPath
           });
-          pendingMethod = null;
+          break;
         }
       }
     } catch (error) {
@@ -1279,51 +1127,58 @@ export class DjangoProjectAnalyzer {
     const endpoints: DjangoApiEndpoint[] = [];
 
     try {
-      const content = this.stripComments(await readFile(filePath, 'utf8'));
-      const lines = content.split('\n');
-      const defRegex = /^(?:async\s+)?def\s+(\w+)\s*\(/;
+      await initPythonParser();
+      const root = parsePython(await readFile(filePath, 'utf8')).rootNode;
 
-      const parseMethods = (raw: string): string[] =>
-        raw.split(',').map(s => s.replace(/['"]/g, '').trim()).filter(Boolean);
-
-      let pending: { method: string; path: string; line: number } | null = null;
-
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-
-        const apiViewMatch = line.match(/^@api_view\s*\(\s*\[([^\]]*)\]/);
-        if (apiViewMatch) {
-          const methods = parseMethods(apiViewMatch[1]);
-          pending = { method: (methods.join(', ') || 'GET').toUpperCase(), path: '', line: i };
-          continue;
+      // @api_view (vistas función) y @action (métodos de ViewSet) pueden estar a
+      // nivel superior o anidados en una clase: se recorre todo el árbol.
+      const walk = (node: SyntaxNode): void => {
+        if (node.type === 'decorated_definition') {
+          const def = node.childForFieldName('definition');
+          if (def && def.type === 'function_definition') {
+            const nameNode = def.childForFieldName('name');
+            if (nameNode) {
+              let pending: { method: string; path: string; line: number } | null = null;
+              for (const dec of node.namedChildren) {
+                if (dec.type !== 'decorator') {
+                  continue;
+                }
+                const call = dec.namedChildren[0];
+                if (!call || call.type !== 'call') {
+                  continue;
+                }
+                const decName = finalSegment(call.childForFieldName('function')?.text ?? '');
+                if (decName === 'api_view') {
+                  const methods = this.stringListValues(this.positionalArgs(call)[0]);
+                  pending = { method: (methods.join(', ') || 'GET').toUpperCase(), path: '', line: dec.startPosition.row };
+                } else if (decName === 'action') {
+                  const methods = this.stringListValues(this.keywordArg(call, 'methods'));
+                  const urlPathNode = this.keywordArg(call, 'url_path');
+                  pending = {
+                    method: (methods.join(', ') || 'GET').toUpperCase(),
+                    path: urlPathNode && urlPathNode.type === 'string' ? this.stringLiteralValue(urlPathNode) : '',
+                    line: dec.startPosition.row
+                  };
+                }
+              }
+              if (pending) {
+                endpoints.push({
+                  method: pending.method,
+                  path: pending.path || nameNode.text,
+                  handler: nameNode.text,
+                  lineNumber: pending.line,
+                  framework: 'drf',
+                  filePath
+                });
+              }
+            }
+          }
         }
-
-        const actionMatch = line.match(/^@action\s*\(/);
-        if (actionMatch) {
-          const methodsMatch = line.match(/methods\s*=\s*\[([^\]]*)\]/);
-          const methods = methodsMatch ? parseMethods(methodsMatch[1]) : [];
-          const urlPathMatch = line.match(/url_path\s*=\s*['"]([^'"]*)['"]/);
-          pending = {
-            method: (methods.join(', ') || 'GET').toUpperCase(),
-            path: urlPathMatch ? urlPathMatch[1] : '',
-            line: i
-          };
-          continue;
+        for (const child of node.namedChildren) {
+          walk(child);
         }
-
-        const defMatch = line.match(defRegex);
-        if (defMatch && pending) {
-          endpoints.push({
-            method: pending.method,
-            path: pending.path || defMatch[1],
-            handler: defMatch[1],
-            lineNumber: pending.line,
-            framework: 'drf',
-            filePath
-          });
-          pending = null;
-        }
-      }
+      };
+      walk(root);
     } catch (error) {
       reportError('Error al analizar endpoints de DRF', error);
     }
@@ -1339,33 +1194,19 @@ export class DjangoProjectAnalyzer {
     const forms: DjangoForm[] = [];
 
     try {
-      const content = this.stripComments(await readFile(formsPath, 'utf8'));
-      const lines = content.split('\n');
-      const classRegex = /^class\s+(\w+)\s*\(([^)]*)\)/;
+      await initPythonParser();
+      const root = parsePython(await readFile(formsPath, 'utf8')).rootNode;
 
-      for (let i = 0; i < lines.length; i++) {
-        const match = lines[i].match(classRegex);
-        if (!match) {
+      for (const cls of this.topLevelClassDefs(root)) {
+        const nameNode = cls.childForFieldName('name');
+        if (!nameNode || !this.classBaseNames(cls).some(b => /Form$/.test(b))) {
           continue;
         }
-        const bases = match[2].split(',').map(b => (b.trim().split('.').pop() || '').trim());
-        if (!bases.some(b => /Form$/.test(b))) {
-          continue;
-        }
-
-        let modelName: string | undefined;
-        for (let j = i + 1; j < lines.length; j++) {
-          if (/^class\s/.test(lines[j])) {
-            break;
-          }
-          const modelMatch = lines[j].match(/^\s+model\s*=\s*(\w+)/);
-          if (modelMatch) {
-            modelName = modelMatch[1];
-            break;
-          }
-        }
-
-        forms.push({ name: match[1], lineNumber: i, modelName });
+        forms.push({
+          name: nameNode.text,
+          lineNumber: nameNode.startPosition.row,
+          modelName: this.findMetaModel(cls)
+        });
       }
     } catch (error) {
       reportError('Error al analizar formularios', error);
@@ -1382,40 +1223,39 @@ export class DjangoProjectAnalyzer {
     const signals: DjangoSignal[] = [];
 
     try {
-      const content = this.stripComments(await readFile(signalsPath, 'utf8'));
-      const lines = content.split('\n');
-      const defRegex = /^(?:async\s+)?def\s+(\w+)\s*\(/;
-      const signalDeclRegex = /^(\w+)\s*=\s*Signal\s*\(/;
-      let pendingReceiver = false;
+      await initPythonParser();
+      const root = parsePython(await readFile(signalsPath, 'utf8')).rootNode;
 
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-
-        if (/^@receiver\b/.test(line)) {
-          pendingReceiver = true;
-          continue;
-        }
-        if (/^@/.test(line)) {
-          // Otro decorador apilado: no rompe la cadena hacia el def.
-          continue;
-        }
-
-        const defMatch = line.match(defRegex);
-        if (defMatch) {
-          if (pendingReceiver) {
-            signals.push({ name: defMatch[1], lineNumber: i, kind: 'receiver' });
+      for (const node of root.namedChildren) {
+        // Funciones decoradas con @receiver(...).
+        if (node.type === 'decorated_definition') {
+          const def = node.childForFieldName('definition');
+          if (def && def.type === 'function_definition') {
+            const isReceiver = node.namedChildren.some(
+              c => c.type === 'decorator' && this.decoratorName(c) === 'receiver'
+            );
+            const nameNode = def.childForFieldName('name');
+            if (isReceiver && nameNode) {
+              signals.push({ name: nameNode.text, lineNumber: nameNode.startPosition.row, kind: 'receiver' });
+            }
           }
-          pendingReceiver = false;
           continue;
         }
 
-        const signalMatch = line.match(signalDeclRegex);
-        if (signalMatch) {
-          signals.push({ name: signalMatch[1], lineNumber: i, kind: 'signal' });
-        }
-
-        if (line !== '') {
-          pendingReceiver = false;
+        // Señales personalizadas: NOMBRE = Signal(...).
+        if (node.type === 'expression_statement') {
+          const assignment = node.namedChildren[0];
+          if (assignment && assignment.type === 'assignment') {
+            const left = assignment.childForFieldName('left');
+            const right = assignment.childForFieldName('right');
+            if (
+              left && left.type === 'identifier' &&
+              right && right.type === 'call' &&
+              finalSegment(right.childForFieldName('function')?.text ?? '') === 'Signal'
+            ) {
+              signals.push({ name: left.text, lineNumber: left.startPosition.row, kind: 'signal' });
+            }
+          }
         }
       }
     } catch (error) {
@@ -1434,34 +1274,41 @@ export class DjangoProjectAnalyzer {
     const tasks: DjangoCeleryTask[] = [];
 
     try {
-      const content = this.stripComments(await readFile(tasksPath, 'utf8'));
-      const lines = content.split('\n');
-      const decoratorRegex = /^@(?:shared_task|\w+\.task)\b/;
-      const defRegex = /^(?:async\s+)?def\s+(\w+)\s*\(/;
-      let pending = false;
+      await initPythonParser();
+      const root = parsePython(await readFile(tasksPath, 'utf8')).rootNode;
 
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
+      // Es Celery si el decorador es `@shared_task` o `@<obj>.task` (con o sin
+      // argumentos). El `@task` desnudo de django.tasks NO cuenta (extractTasks).
+      const isCeleryDecorator = (dec: SyntaxNode): boolean => {
+        const expr = dec.namedChildren[0];
+        if (!expr) {
+          return false;
+        }
+        const target = expr.type === 'call' ? expr.childForFieldName('function') : expr;
+        if (!target) {
+          return false;
+        }
+        if (target.type === 'identifier') {
+          return target.text === 'shared_task';
+        }
+        if (target.type === 'attribute') {
+          return target.childForFieldName('attribute')?.text === 'task';
+        }
+        return false;
+      };
 
-        if (decoratorRegex.test(line)) {
-          pending = true;
+      for (const node of root.namedChildren) {
+        if (node.type !== 'decorated_definition') {
           continue;
         }
-        if (/^@/.test(line)) {
+        const def = node.childForFieldName('definition');
+        if (!def || def.type !== 'function_definition') {
           continue;
         }
-
-        const defMatch = line.match(defRegex);
-        if (defMatch) {
-          if (pending) {
-            tasks.push({ name: defMatch[1], lineNumber: i });
-          }
-          pending = false;
-          continue;
-        }
-
-        if (line !== '') {
-          pending = false;
+        const isCelery = node.namedChildren.some(c => c.type === 'decorator' && isCeleryDecorator(c));
+        const nameNode = def.childForFieldName('name');
+        if (isCelery && nameNode) {
+          tasks.push({ name: nameNode.text, lineNumber: nameNode.startPosition.row });
         }
       }
     } catch (error) {
@@ -1534,16 +1381,35 @@ export class DjangoProjectAnalyzer {
     if (!segment) {
       return undefined;
     }
-    const nameRegex = new RegExp(`name\\s*=\\s*['"]${escapeRegExp(segment)}['"]`);
     const urlsFiles = await this.findProjectFiles(projectRoot, 'urls.py');
+    await initPythonParser();
+
+    // Localiza el argumento `name='<segment>'` de un path()/re_path()/url() en el
+    // AST. El recorrido ignora comentarios de forma natural.
+    const findName = (node: SyntaxNode): SyntaxNode | undefined => {
+      if (
+        node.type === 'keyword_argument' &&
+        node.childForFieldName('name')?.text === 'name'
+      ) {
+        const value = node.childForFieldName('value');
+        if (value && value.type === 'string' && this.stringLiteralValue(value) === segment) {
+          return node;
+        }
+      }
+      for (const child of node.namedChildren) {
+        const found = findName(child);
+        if (found) {
+          return found;
+        }
+      }
+      return undefined;
+    };
 
     for (const file of urlsFiles) {
-      const content = this.stripComments(await readFile(file, 'utf8'));
-      const lines = content.split('\n');
-      for (let i = 0; i < lines.length; i++) {
-        if (nameRegex.test(lines[i])) {
-          return { filePath: file, lineNumber: i };
-        }
+      const root = parsePython(await readFile(file, 'utf8')).rootNode;
+      const match = findName(root);
+      if (match) {
+        return { filePath: file, lineNumber: match.startPosition.row };
       }
     }
     return undefined;
@@ -1572,16 +1438,33 @@ export class DjangoProjectAnalyzer {
     if (!modelName) {
       return undefined;
     }
-    const classRegex = new RegExp(`^class\\s+${escapeRegExp(modelName)}\\s*\\(`);
     const modelsFiles = await this.findProjectFiles(projectRoot, 'models.py');
+    await initPythonParser();
+
+    // Localiza `class <modelName>(...)` en el AST (con clase base, como exigía el
+    // regex original). El recorrido cubre clases anidadas e ignora comentarios.
+    const findClass = (node: SyntaxNode): SyntaxNode | undefined => {
+      if (
+        node.type === 'class_definition' &&
+        node.childForFieldName('name')?.text === modelName &&
+        node.childForFieldName('superclasses')
+      ) {
+        return node.childForFieldName('name') ?? node;
+      }
+      for (const child of node.namedChildren) {
+        const found = findClass(child);
+        if (found) {
+          return found;
+        }
+      }
+      return undefined;
+    };
 
     for (const file of modelsFiles) {
-      const content = this.stripComments(await readFile(file, 'utf8'));
-      const lines = content.split('\n');
-      for (let i = 0; i < lines.length; i++) {
-        if (classRegex.test(lines[i].trim())) {
-          return { filePath: file, lineNumber: i };
-        }
+      const root = parsePython(await readFile(file, 'utf8')).rootNode;
+      const match = findClass(root);
+      if (match) {
+        return { filePath: file, lineNumber: match.startPosition.row };
       }
     }
     return undefined;

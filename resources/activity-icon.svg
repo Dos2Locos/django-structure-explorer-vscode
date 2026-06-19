@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+  <!-- Icono monocromo para la barra de actividad: VS Code lo enmascara con el
+       color del tema, así que se usan formas opacas sólidas (sin degradados).
+       Representa una estructura en árbol, acorde al explorador de estructura. -->
+  <!-- nodo raíz -->
+  <rect x="8.5" y="2" width="7" height="5" rx="1.2"/>
+  <!-- conectores -->
+  <rect x="11.25" y="7" width="1.5" height="4"/>
+  <rect x="4.25" y="10.5" width="15.5" height="1.5"/>
+  <rect x="4.25" y="11" width="1.5" height="4"/>
+  <rect x="11.25" y="11" width="1.5" height="4"/>
+  <rect x="18.25" y="11" width="1.5" height="4"/>
+  <!-- hojas -->
+  <rect x="1.5" y="15" width="7" height="5" rx="1.2"/>
+  <rect x="8.5" y="15" width="7" height="5" rx="1.2"/>
+  <rect x="15.5" y="15" width="7" height="5" rx="1.2"/>
+</svg>

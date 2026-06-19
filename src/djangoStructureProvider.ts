@@ -71,7 +71,9 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       // Red de seguridad: cualquier fallo inesperado deja el árbol vacío pero
       // avisa al usuario, en vez de romper el TreeDataProvider en silencio.
       const message = error instanceof Error ? error.message : String(error);
-      console.error(`[DjangoStructureExplorer] Error en getChildren: ${message}`);
+      // Registrar el error completo (con `stack`) para ver el stacktrace en la
+      // consola de Developer Tools; el mensaje breve va al aviso al usuario.
+      console.error('[DjangoStructureExplorer] Error en getChildren:', error);
       vscode.window.showErrorMessage(`Django Structure Explorer: error inesperado. ${message}`);
       return [];
     }
@@ -259,7 +261,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
    */
   private finalizeItems(items: DjangoTreeItem[]): DjangoTreeItem[] {
     if (!this.filterText) {
-      return this.finalizeItems(items);
+      return this.sortItems(items);
     }
     const needle = this.filterText.toLowerCase();
     const filtered = items.filter(item =>
@@ -832,7 +834,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
     const urls = await this.analyzer.extractUrls(urlsPath);
     const items = urls.map(url => {
       const urlItem = new DjangoTreeItem(
-        url.pattern,
+        url.pattern || '/',
         vscode.TreeItemCollapsibleState.None,
         {
           command: 'djangoStructureExplorer.openFile',

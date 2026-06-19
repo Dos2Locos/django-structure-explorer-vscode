@@ -10,6 +10,7 @@ const FIXTURES_DJ6 = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixture
 const FIXTURES_CELERY = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'celeryapp');
 const FIXTURES_REST = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'restapp');
 const FIXTURES_NAV = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'navproj');
+const FIXTURES_DECORATED = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'decoratedapp');
 
 describe('DjangoProjectAnalyzer — red de seguridad de parsing (Fase 4)', () => {
   const analyzer = new DjangoProjectAnalyzer();
@@ -229,6 +230,24 @@ describe('DjangoProjectAnalyzer — red de seguridad de parsing (Fase 4)', () =>
       const names = settings.map(s => s.name);
       // DATABASES (multilínea) no debe inyectar claves internas como settings.
       assert.ok(names.includes('REAL_SETTING'), 'falta REAL_SETTING tras el bloque multilínea');
+    });
+
+    // Regresión señalada por Codex en la PR: un modelo con decorador de clase
+    // (envuelto por tree-sitter en decorated_definition) no debe perderse.
+    it('[Codex] detecta modelos con decorador de clase y sus subclases', async () => {
+      const models = await analyzer.extractModels(path.join(FIXTURES_DECORATED, 'models.py'));
+      const names = models.map(m => m.name);
+      assert.ok(names.includes('Auditada'), 'falta el modelo decorado Auditada');
+      assert.ok(names.includes('HijaDeAuditada'), 'falta la subclase del modelo decorado (herencia transitiva)');
+    });
+
+    // Regresión señalada por Codex: el prefijo del path() externo debe propagarse
+    // a las rutas incluidas (path('b/', include('b.urls')) → b/lista/, no lista/).
+    it('[Codex] propaga el prefijo externo del path() a las rutas incluidas', async () => {
+      const urls = await analyzer.extractUrls(path.join(FIXTURES_CYCLE, 'a', 'urls.py'));
+      const leaf = urls.find(u => u.viewName === 'views.b_list');
+      assert.ok(leaf, 'falta la ruta hoja incluida desde b.urls');
+      assert.strictEqual(leaf!.pattern, 'b/lista/', 'la ruta incluida debe llevar el prefijo del path() externo');
     });
   });
 
