@@ -162,5 +162,9 @@
     "glob": "^7.1.7",
     "mocha": "^11.1.0",
     "typescript": "^4.3.2"
+  },
+  "dependencies": {
+    "tree-sitter-wasms": "0.1.13",
+    "web-tree-sitter": "0.20.8"
   }
 }

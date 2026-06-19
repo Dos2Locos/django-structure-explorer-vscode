@@ -8,3 +8,7 @@ vsc-extension-quickstart.md
 **/.eslintrc.json
 **/*.map
 **/*.ts
+# tree-sitter-wasms incluye ~40 gramáticas; solo usamos Python. Excluir el resto
+# mantiene el .vsix pequeño (cada .wasm pesa cientos de KB).
+node_modules/tree-sitter-wasms/out/*.wasm
+!node_modules/tree-sitter-wasms/out/tree-sitter-python.wasm

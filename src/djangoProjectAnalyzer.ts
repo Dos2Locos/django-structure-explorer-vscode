@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as util from 'util';
+import { initPythonParser, parsePython, finalSegment, SyntaxNode } from './pythonParser';
 
 const readFile = util.promisify(fs.readFile);
 const readdir = util.promisify(fs.readdir);
@@ -302,376 +303,152 @@ export class DjangoProjectAnalyzer {
     const models: DjangoModel[] = [];
 
     try {
-      const content = this.stripComments(await readFile(modelsPath, 'utf8'));
-      const lines = content.split('\n');
+      await initPythonParser();
+      const content = await readFile(modelsPath, 'utf8');
+      const root = parsePython(content).rootNode;
 
-      // Analizar las importaciones para detectar alias de models o importaciones directas
-      const importAliases: {[key: string]: string} = {};
-      const directImports: string[] = [];
-
-      // Buscar importaciones como "from django.db import models" o "from django.db.models import CharField, TextField"
-      for (let i = 0; i < 30 && i < lines.length; i++) { // Revisar solo las primeras líneas
-        const line = lines[i].trim();
-
-        // Detectar alias de models
-        const aliasMatch = line.match(/^from\s+django\.db\s+import\s+models\s+as\s+(\w+)/);
-        if (aliasMatch) {
-          importAliases['models'] = aliasMatch[1];
+      // Importaciones: mapa nombre→módulo, para detectar modelos cuya clase base
+      // se importa de un módulo `*.models` (p. ej. `from core.models import BaseModel`).
+      const importedBaseClasses: { [name: string]: string } = {};
+      for (const imp of root.namedChildren) {
+        if (imp.type !== 'import_from_statement') {
+          continue;
         }
-
-        // Detectar importaciones directas de tipos de campo
-        const directImportMatch = line.match(/^from\s+django\.db\.models\s+import\s+(.+)$/);
-        if (directImportMatch) {
-          const imports = directImportMatch[1].split(',').map(i => i.trim());
-          directImports.push(...imports);
-        }
-      }
-
-      // Almacenar las clases base importadas que podrían ser modelos
-      const importedBaseClasses: {[key: string]: string} = {};
-
-      // Buscar importaciones de clases base personalizadas
-      for (let i = 0; i < 30 && i < lines.length; i++) {
-        const line = lines[i].trim();
-
-        // Detectar importaciones de clases base
-        const baseClassMatch = line.match(/^from\s+([\w.]+)\s+import\s+([\w,\s]+)$/);
-        if (baseClassMatch) {
-          const module = baseClassMatch[1];
-          const imports = baseClassMatch[2].split(',').map(i => i.trim());
-
-          imports.forEach(importName => {
-            importedBaseClasses[importName] = module;
-          });
-        }
-      }
-
-      // Función para verificar si una clase base es un modelo Django basado en importaciones
-      const isDjangoModel = (baseClass: string): boolean => {
-        // Casos directos
-        if (baseClass === 'models.Model' || baseClass === 'Model') {
-          return true;
-        }
-
-        // Verificar clases importadas
-        const cleanBase = baseClass.trim();
-        if (importedBaseClasses[cleanBase]) {
-          const module = importedBaseClasses[cleanBase];
-          return module.includes('django.db.models') ||
-                 module.includes('django.contrib.gis.db.models') ||
-                 module.endsWith('.models');
-        }
-
-        return false;
-      };
-
-      // Mantener un registro de las clases que son modelos
-      const modelClasses = new Set<string>();
-
-      // Lista de clases base comunes que indican que es un modelo
-      const modelBaseClasses = [
-        'Model',
-        'models.Model',
-        'TranslatableModel',
-        'MPTTModel',
-        'AbstractUser',
-        'AbstractBaseUser',
-        'TimeStampedModel',
-        'BaseModel',
-        'DjangoModel',
-        'ChangeControlMixin',  // Aunque es un mixin, lo incluimos para detectar modelos que lo usan
-        'SoftDeletableModel',
-        'TimestampedModel',
-        'UUIDModel',
-        'TreeModel',
-        'Page',
-        'AbstractPage',
-        'AbstractModel',
-        'AbstractBaseModel'
-      ];
-
-      // Primera pasada: identificar todas las clases que heredan directamente de Model o clases base conocidas
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (line.startsWith('class ')) {
-          const classMatch = line.match(/^class\s+(\w+)\s*\(([^)]+)\)/);
-          if (classMatch) {
-            const className = classMatch[1];
-            const baseClasses = classMatch[2].split(',').map(c => c.trim());
-
-            // Verificar si hereda de alguna clase base conocida explícitamente o a través de importación
-            if (baseClasses.some(base =>
-              modelBaseClasses.includes(base.split('.')?.pop() || base) ||
-              isDjangoModel(base)
-            )) {
-              modelClasses.add(className);
-            }
+        const moduleNode = imp.childForFieldName('module_name');
+        const module = moduleNode ? moduleNode.text : '';
+        for (const child of imp.namedChildren) {
+          if ((moduleNode && child.id === moduleNode.id) || child.type === 'wildcard_import') {
+            continue;
+          }
+          const importedName = child.type === 'aliased_import'
+            ? (child.childForFieldName('name')?.text ?? child.text)
+            : child.text;
+          if (importedName) {
+            importedBaseClasses[importedName] = module;
           }
         }
       }
 
-      // Segunda pasada: identificar clases que heredan de modelos ya identificados
-      let newModelsFound = true;
-      while (newModelsFound) {
-        newModelsFound = false;
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i].trim();
-          if (line.startsWith('class ')) {
-            const classMatch = line.match(/^class\s+(\w+)\s*\(([^)]+)\)/);
-            if (classMatch) {
-              const className = classMatch[1];
-              if (!modelClasses.has(className)) {
-                const baseClasses = classMatch[2].split(',').map(c => c.trim());
-                // Si alguna clase base es un modelo conocido, esta también es un modelo
-                if (baseClasses.some(base => modelClasses.has(base))) {
-                  modelClasses.add(className);
-                  newModelsFound = true;
+      const isDjangoModelBase = (baseFullText: string): boolean => {
+        if (baseFullText === 'models.Model' || baseFullText === 'Model') {
+          return true;
+        }
+        const module = importedBaseClasses[baseFullText.trim()];
+        if (module) {
+          return module.includes('django.db.models') ||
+                 module.includes('django.contrib.gis.db.models') ||
+                 module.endsWith('.models');
+        }
+        return false;
+      };
+
+      // Clases base que, por convención, indican que la clase es un modelo Django.
+      const modelBaseClasses = new Set([
+        'Model', 'models.Model', 'TranslatableModel', 'MPTTModel', 'AbstractUser',
+        'AbstractBaseUser', 'TimeStampedModel', 'BaseModel', 'DjangoModel',
+        'ChangeControlMixin', 'SoftDeletableModel', 'TimestampedModel', 'UUIDModel',
+        'TreeModel', 'Page', 'AbstractPage', 'AbstractModel', 'AbstractBaseModel'
+      ]);
+
+      // Recolectar todas las clases de nivel superior con sus bases (texto completo).
+      interface ClassInfo {
+        node: SyntaxNode;
+        name: string;
+        nameRow: number;
+        bases: string[];
+      }
+      const classes: ClassInfo[] = [];
+      for (const node of root.namedChildren) {
+        if (node.type !== 'class_definition') {
+          continue;
+        }
+        const nameNode = node.childForFieldName('name');
+        if (!nameNode) {
+          continue;
+        }
+        const bases: string[] = [];
+        const supers = node.childForFieldName('superclasses');
+        if (supers) {
+          for (const arg of supers.namedChildren) {
+            if (arg.type === 'identifier' || arg.type === 'attribute') {
+              bases.push(arg.text);
+            }
+          }
+        }
+        classes.push({ node, name: nameNode.text, nameRow: nameNode.startPosition.row, bases });
+      }
+
+      // Determinar qué clases son modelos: base conocida / importada de `*.models` …
+      const modelClasses = new Set<string>();
+      for (const cls of classes) {
+        if (cls.bases.some(b => modelBaseClasses.has(finalSegment(b)) || isDjangoModelBase(b))) {
+          modelClasses.add(cls.name);
+        }
+      }
+      // … y herencia transitiva (un modelo que hereda de otro modelo ya identificado).
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const cls of classes) {
+          if (!modelClasses.has(cls.name) && cls.bases.some(b => modelClasses.has(finalSegment(b)))) {
+            modelClasses.add(cls.name);
+            changed = true;
+          }
+        }
+      }
+
+      // Extraer campos de cada modelo, en orden de aparición. El AST ignora de forma
+      // natural los comentarios (incluso con paréntesis) y las clases anidadas (Meta).
+      for (const cls of classes) {
+        if (!modelClasses.has(cls.name)) {
+          continue;
+        }
+        const model: DjangoModel = { name: cls.name, lineNumber: cls.nameRow, fields: [] };
+        const body = cls.node.childForFieldName('body');
+        if (body) {
+          for (const stmt of body.namedChildren) {
+            // Campo: asignación de nivel superior cuyo valor es una llamada
+            // (p. ej. `created = models.DateTimeField(...)`). Multilínea incluido.
+            if (stmt.type === 'expression_statement') {
+              const assignment = stmt.namedChildren[0];
+              if (assignment && assignment.type === 'assignment') {
+                const left = assignment.childForFieldName('left');
+                const right = assignment.childForFieldName('right');
+                if (left && left.type === 'identifier' && right && right.type === 'call') {
+                  const fn = right.childForFieldName('function');
+                  const calleeText = fn
+                    ? (fn.type === 'attribute' ? (fn.childForFieldName('attribute')?.text ?? fn.text) : fn.text)
+                    : 'unknown';
+                  model.fields!.push({
+                    name: left.text,
+                    fieldType: finalSegment(calleeText),
+                    lineNumber: assignment.startPosition.row
+                  });
+                }
+              }
+            }
+            // Método decorado con @property → se expone como "campo" de tipo property.
+            else if (stmt.type === 'decorated_definition') {
+              const hasProperty = stmt.namedChildren.some(
+                c => c.type === 'decorator' && c.namedChildren[0]?.text === 'property'
+              );
+              const def = stmt.childForFieldName('definition');
+              if (hasProperty && def && def.type === 'function_definition') {
+                const methodName = def.childForFieldName('name');
+                if (methodName) {
+                  model.fields!.push({
+                    name: methodName.text,
+                    fieldType: 'property',
+                    lineNumber: def.startPosition.row,
+                    isProperty: true
+                  });
                 }
               }
             }
           }
         }
+        models.push(model);
       }
-
-      // Expresión regular para encontrar el inicio de una clase
-      const classRegex = /^class\s+(\w+)\s*\(/;
-      // Expresión regular para encontrar el inicio de la clase Meta
-      const metaClassRegex = /^\s+class\s+Meta\s*:/;
-      // Expresión regular para detectar decoradores @property
-      const propertyDecoratorRegex = /^\s*@property\s*$/;
-
-      let currentModel: DjangoModel | null = null;
-      let inModelDefinition = false;
-      let inMetaClass = false;
-      let classIndentation = 0;
-      let metaIndentation = 0; // Indentación de la línea `class Meta:`
-      let fieldStartIndentation = 0;
-      let currentFieldName = '';
-      let currentFieldType = '';
-      let currentFieldLine = 0;
-      let parenthesesCount = 0; // Para rastrear paréntesis abiertos/cerrados
-      let isPropertyMethod = false; // Para rastrear si el próximo método tiene el decorador @property
-
-      // Patrones de campo compilados UNA sola vez (no dependen de la línea).
-      // El último grupo captura el paréntesis de apertura (`\(?` dentro del grupo)
-      // para que el conteo de paréntesis cuente tanto `(` como `)`. El tipo de campo
-      // es siempre el grupo 2 tanto en patrones con prefijo como en importación directa.
-      const fieldPatterns: RegExp[] = [
-        new RegExp(`^\\s+(\\w+)\\s*=\\s*models\\.(\\w+)\\s*(\\(?.*)`)
-      ];
-      if (importAliases['models']) {
-        fieldPatterns.push(new RegExp(`^\\s+(\\w+)\\s*=\\s*${importAliases['models']}\\.(\\w+)\\s*(\\(?.*)`));
-      }
-      if (directImports.length > 0) {
-        const directImportsPattern = directImports.map(escapeRegExp).join('|');
-        fieldPatterns.push(new RegExp(`^\\s+(\\w+)\\s*=\\s*(${directImportsPattern})\\s*(\\(?.*)`));
-      }
-
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const indentMatch = line.match(/^(\s*)/);
-        const indentation = indentMatch ? indentMatch[1].length : 0;
-
-        // Detectar decorador @property
-        if (line.trim().match(propertyDecoratorRegex)) {
-          isPropertyMethod = true;
-          continue;
-        }
-
-        // Detectar una nueva clase
-        const classMatch = line.match(classRegex);
-        if (classMatch && modelClasses.has(classMatch[1])) {
-          // Guardar el modelo anterior si existe
-          if (currentModel) {
-            models.push(currentModel);
-          }
-
-          // Crear un nuevo modelo
-          currentModel = {
-            name: classMatch[1],
-            lineNumber: i,
-            fields: []
-          };
-
-          // Iniciar el seguimiento de la definición del modelo
-          inModelDefinition = true;
-          inMetaClass = false;
-          classIndentation = indentation;
-          isPropertyMethod = false;
-          continue;
-        }
-
-        // Si no estamos dentro de un modelo, continuar
-        if (!currentModel || !inModelDefinition) {
-          isPropertyMethod = false;
-          continue;
-        }
-
-        // Si es una línea vacía, continuar
-        if (line.trim() === '') {
-          continue;
-        }
-
-        // Detectar si estamos entrando en la clase Meta
-        if (line.match(metaClassRegex)) {
-          inMetaClass = true;
-          metaIndentation = indentation;
-          isPropertyMethod = false;
-          continue;
-        }
-
-        // Salir de la clase Meta al volver a un nivel de indentación igual o menor
-        // al de `class Meta:` (p. ej. un campo declarado tras Meta, caso #11).
-        // Antes inMetaClass solo se reseteaba al cambiar de clase, perdiendo esos campos.
-        if (inMetaClass && line.trim() !== '' && indentation <= metaIndentation) {
-          inMetaClass = false;
-        }
-
-        // Si la indentación es menor o igual a la de la clase, hemos salido del modelo
-        if (indentation <= classIndentation && line.trim() !== '') {
-          // Guardar el modelo actual
-          models.push(currentModel);
-          currentModel = null;
-          inModelDefinition = false;
-          inMetaClass = false;
-          isPropertyMethod = false;
-          continue;
-        }
-
-        // Ignorar líneas dentro de la clase Meta
-        if (inMetaClass) {
-          continue;
-        }
-
-        // Detectar método con decorador @property
-        const methodMatch = line.match(/^\s+def\s+(\w+)\s*\(/);
-        if (isPropertyMethod && methodMatch) {
-          currentModel.fields!.push({
-            name: methodMatch[1],
-            fieldType: 'property',
-            lineNumber: i,
-            isProperty: true
-          });
-          isPropertyMethod = false;
-          continue;
-        }
-
-        // Construir expresión regular para detectar campos considerando alias e importaciones directas
-        // Intentar cada patrón (ya compilados fuera del bucle)
-        let fieldMatch: RegExpMatchArray | null = null;
-        for (const regex of fieldPatterns) {
-          const match = line.match(regex);
-          if (match) {
-            fieldMatch = match;
-            break;
-          }
-        }
-
-        if (fieldMatch) {
-          // Si estábamos procesando un campo anterior, añadirlo al modelo
-          if (currentFieldName && currentFieldType) {
-            currentModel.fields!.push({
-              name: currentFieldName,
-              fieldType: currentFieldType,
-              lineNumber: currentFieldLine
-            });
-          }
-
-          // Iniciar el seguimiento de un nuevo campo. El tipo es siempre el grupo 2.
-          currentFieldName = fieldMatch[1];
-          currentFieldType = fieldMatch[2];
-          currentFieldLine = i;
-          fieldStartIndentation = indentation;
-
-          // Contar paréntesis abiertos y cerrados en esta línea
-          const openParens = (fieldMatch[fieldMatch.length - 1].match(/\(/g) || []).length;
-          const closeParens = (fieldMatch[fieldMatch.length - 1].match(/\)/g) || []).length;
-          parenthesesCount = openParens - closeParens;
-
-          // Si los paréntesis están equilibrados, el campo está completo en esta línea
-          if (parenthesesCount === 0) {
-            currentModel.fields!.push({
-              name: currentFieldName,
-              fieldType: currentFieldType,
-              lineNumber: currentFieldLine
-            });
-            currentFieldName = '';
-            currentFieldType = '';
-          }
-        }
-        // Continuación de un campo de múltiples líneas
-        else if (currentFieldName && currentFieldType && parenthesesCount > 0) {
-          // Contar paréntesis en esta línea
-          const openParens = (line.match(/\(/g) || []).length;
-          const closeParens = (line.match(/\)/g) || []).length;
-          parenthesesCount += openParens - closeParens;
-
-          // Si los paréntesis están equilibrados, el campo está completo
-          if (parenthesesCount === 0) {
-            currentModel.fields!.push({
-              name: currentFieldName,
-              fieldType: currentFieldType,
-              lineNumber: currentFieldLine
-            });
-            currentFieldName = '';
-            currentFieldType = '';
-          }
-        }
-        // Nueva línea con la misma indentación que el nivel de campo, pero no es continuación
-        else if (indentation === fieldStartIndentation && !line.trim().startsWith('#')) {
-          // Verificar si es un nuevo campo con cualquier formato no capturado anteriormente
-          const otherFieldRegex = /^\s+(\w+)\s*=\s*(\w+)(?:\.(\w+))?\s*(\(?.*)/;
-          const otherFieldMatch = line.match(otherFieldRegex);
-
-          if (otherFieldMatch) {
-            // Si estábamos procesando un campo anterior, añadirlo al modelo
-            if (currentFieldName && currentFieldType) {
-              currentModel.fields!.push({
-                name: currentFieldName,
-                fieldType: currentFieldType,
-                lineNumber: currentFieldLine
-              });
-            }
-
-            // Iniciar el seguimiento de un nuevo campo
-            currentFieldName = otherFieldMatch[1];
-            // El tipo de campo puede ser con o sin prefijo
-            currentFieldType = otherFieldMatch[3] || otherFieldMatch[2];
-            currentFieldLine = i;
-
-            // Contar paréntesis abiertos y cerrados en esta línea
-            const openParens = (otherFieldMatch[4].match(/\(/g) || []).length;
-            const closeParens = (otherFieldMatch[4].match(/\)/g) || []).length;
-            parenthesesCount = openParens - closeParens;
-
-            // Si los paréntesis están equilibrados, el campo está completo en esta línea
-            if (parenthesesCount === 0) {
-              currentModel.fields!.push({
-                name: currentFieldName,
-                fieldType: currentFieldType,
-                lineNumber: currentFieldLine
-              });
-              currentFieldName = '';
-              currentFieldType = '';
-            }
-          }
-        }
-      }
-
-      // Añadir el último campo si existe
-      if (currentFieldName && currentFieldType && currentModel) {
-        currentModel.fields!.push({
-          name: currentFieldName,
-          fieldType: currentFieldType,
-          lineNumber: currentFieldLine
-        });
-      }
-
-      // Añadir el último modelo si existe
-      if (currentModel) {
-        models.push(currentModel);
-      }
-
     } catch (error) {
       reportError('Error al analizar modelos', error);
     }
