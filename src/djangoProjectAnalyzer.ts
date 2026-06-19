@@ -855,57 +855,38 @@ export class DjangoProjectAnalyzer {
     const settings: DjangoSetting[] = [];
 
     try {
-      // stripComments neutraliza comentarios (`#` y bloques `"""`) respetando las
-      // cadenas, así que aquí ya no hace falta recortar comentarios a mano.
-      const content = this.stripComments(await readFile(settingsPath, 'utf8'));
-      const lines = content.split('\n');
+      await initPythonParser();
+      const content = await readFile(settingsPath, 'utf8');
+      const root = parsePython(content).rootNode;
 
-      // Expresión regular para encontrar definiciones de variables
-      const settingRegex = /^([A-Z_][A-Z0-9_]*)\s*=\s*(.+)$/;
+      // Un setting es una asignación de nivel superior cuyo nombre va en
+      // MAYÚSCULAS (convención Django). El AST captura el valor completo —
+      // incluidos dicts/listas multilínea anidados— sin contar brackets a mano,
+      // e ignora de forma natural comentarios y docstrings (no son asignaciones).
+      const isSettingName = /^[A-Z_][A-Z0-9_]*$/;
 
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-
-        // Ignorar líneas vacías (los comentarios ya quedaron en blanco).
-        if (line === '') {
+      for (const node of root.namedChildren) {
+        if (node.type !== 'expression_statement') {
+          continue;
+        }
+        const assignment = node.namedChildren[0];
+        if (!assignment || assignment.type !== 'assignment') {
+          continue;
+        }
+        const left = assignment.childForFieldName('left');
+        const right = assignment.childForFieldName('right');
+        if (!left || left.type !== 'identifier' || !isSettingName.test(left.text) || !right) {
           continue;
         }
 
-        const match = line.match(settingRegex);
-        if (match) {
-          const startLine = i; // línea donde se declara el nombre del setting
-          let value = match[2].trim();
-
-          // Manejar valores multilínea contando el BALANCE de brackets (corchetes,
-          // llaves y paréntesis). Antes se cortaba en el primer cierre encontrado, lo
-          // que rompía estructuras anidadas como DATABASES = { "default": { ... } }.
-          const countOpen = (s: string): number => (s.match(/[[{(]/g) || []).length;
-          const countClose = (s: string): number => (s.match(/[\]})]/g) || []).length;
-          let depth = countOpen(value) - countClose(value);
-
-          if (depth > 0) {
-            let j = i + 1;
-            let multilineValue = value;
-
-            while (j < lines.length && depth > 0) {
-              const nextLine = lines[j].trim();
-              multilineValue += ' ' + nextLine;
-              depth += countOpen(nextLine) - countClose(nextLine);
-              j++;
-            }
-
-            value = multilineValue;
-            // Avanzar el índice para no re-escanear las líneas de continuación
-            // ya consumidas (evita settings fantasma y trabajo duplicado).
-            i = j - 1;
-          }
-
-          settings.push({
-            name: match[1],
-            value: value,
-            lineNumber: startLine
-          });
-        }
+        // Colapsar la indentación/saltos de los valores multilínea a una sola
+        // línea, como hacía la versión anterior (mejor presentación en el árbol).
+        const value = right.text.replace(/\s+/g, ' ').trim();
+        settings.push({
+          name: left.text,
+          value,
+          lineNumber: left.startPosition.row
+        });
       }
     } catch (error) {
       reportError('Error al analizar settings', error);
