@@ -1,0 +1,528 @@
+# Instincts generated from https://github.com/Dos2Locos/django-structure-explorer-vscode
+# Generated: 2026-06-19T11:57:40.576Z
+# Version: 2.0
+# NOTE: This file supplements (does not replace) any existing curated instincts.
+# High-confidence manually curated instincts should be preserved alongside these.
+
+---
+id: django-structure-explorer-vscode-commit-conventional
+trigger: "when writing a commit message"
+confidence: 0.85
+domain: git
+source: repo-analysis
+source_repo: https://github.com/Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Commit Conventional
+
+## Action
+
+Use conventional commit format with prefixes: fix, chore, feat
+
+## Evidence
+
+- 4 commits analyzed
+- Detected conventional commit pattern
+- Examples: fix: resolver el urls.py raíz por settings.py y abrir el fichero real de URLs incluidas, chore: release 1.4.1 (la 1.4.0 ya está publicada en el Marketplace)
+
+---
+id: django-structure-explorer-vscode-commit-length
+trigger: "when writing a commit message"
+confidence: 0.6
+domain: git
+source: repo-analysis
+source_repo: https://github.com/Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Commit Length
+
+## Action
+
+Write moderate-length commit messages (~69 characters)
+
+## Evidence
+
+- Average commit message length: 69 chars
+- Based on 4 commits
+
+---
+id: django-structure-explorer-vscode-naming-files
+trigger: "when creating a new file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Naming Files
+
+## Action
+
+Use camelCase naming convention
+
+## Evidence
+
+- Analyzed file naming patterns in repository
+- Dominant pattern: camelCase
+
+---
+id: django-structure-explorer-vscode-import-relative
+trigger: "when importing modules"
+confidence: 0.75
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Import Relative
+
+## Action
+
+Use relative imports for project files
+
+## Evidence
+
+- Import analysis shows relative import pattern
+- Example: import { x } from '../lib/x'
+
+---
+id: django-structure-explorer-vscode-export-style
+trigger: "when exporting from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Export Style
+
+## Action
+
+Prefer named exports
+
+## Evidence
+
+- Export pattern analysis
+- Dominant style: named
+
+---
+id: django-structure-explorer-vscode-test-colocate
+trigger: "when writing tests"
+confidence: 0.85
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Test Colocate
+
+## Action
+
+Place test file next to the source file (e.g., Button.test.tsx next to Button.tsx)
+
+## Evidence
+
+- Colocated test pattern detected
+- Tests live alongside source files
+
+---
+id: django-structure-explorer-vscode-test-framework
+trigger: "when writing tests"
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Test Framework
+
+## Action
+
+Use mocha as the test framework
+
+## Evidence
+
+- Test framework detected: mocha
+- File pattern: *.test.ts
+
+---
+id: django-structure-explorer-vscode-test-naming
+trigger: "when creating a test file"
+confidence: 0.85
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Test Naming
+
+## Action
+
+Name test files using the pattern: *.test.ts
+
+## Evidence
+
+- File pattern: *.test.ts
+- Consistent across test files
+
+---
+id: django-structure-explorer-vscode-test-types
+trigger: "when planning tests for a feature"
+confidence: 0.7
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Test Types
+
+## Action
+
+Write unit, integration tests to match project standards
+
+## Evidence
+
+- Test types detected: unit, integration
+- Coverage config: no
+
+---
+id: django-structure-explorer-vscode-workflow-feature-or-bugfix-with-tests-and-changelog
+trigger: "when doing feature or bugfix with tests and changelog"
+confidence: 0.6
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Workflow Feature Or Bugfix With Tests And Changelog
+
+## Action
+
+Follow the feature-or-bugfix-with-tests-and-changelog workflow:
+1. Edit or add implementation files (e.g., src/djangoProjectAnalyzer.ts, src/djangoStructureProvider.ts)
+2. Update or add corresponding tests (e.g., src/test/analyzer.test.ts)
+3. Update CHANGELOG.md to document the change
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~2x per month
+- Files: src/djangoProjectAnalyzer.ts, src/djangoStructureProvider.ts, src/test/analyzer.test.ts
+
+---
+id: django-structure-explorer-vscode-workflow-update-ignore-files
+trigger: "when doing update ignore files"
+confidence: 0.55
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Workflow Update Ignore Files
+
+## Action
+
+Follow the update-ignore-files workflow:
+1. Edit .gitignore to add or remove patterns
+2. Edit .vscodeignore to add or remove patterns
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~1x per month
+- Files: .gitignore, .vscodeignore
+
+---
+id: django-structure-explorer-vscode-workflow-release-version-update
+trigger: "when doing release version update"
+confidence: 0.55
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Workflow Release Version Update
+
+## Action
+
+Follow the release-version-update workflow:
+1. Update CHANGELOG.md with release notes
+2. Update package.json version
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~1x per month
+- Files: CHANGELOG.md, package.json
+
+---
+id: django-structure-explorer-vscode-instinct-file-naming
+trigger: "When creating or renaming a file in the codebase"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Instinct File Naming
+
+## Action
+
+Name the file using camelCase (e.g., djangoProjectAnalyzer.ts)
+
+## Evidence
+
+- Pattern in files: src/djangoProjectAnalyzer.ts, src/djangoStructureProvider.ts
+
+---
+id: django-structure-explorer-vscode-instinct-function-naming
+trigger: "When defining a function"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Instinct Function Naming
+
+## Action
+
+Use camelCase for function names
+
+## Evidence
+
+- Pattern in TypeScript codebase
+- No evidence of snake_case or PascalCase for functions
+
+---
+id: django-structure-explorer-vscode-instinct-class-naming
+trigger: "When defining a class"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Instinct Class Naming
+
+## Action
+
+Use PascalCase for class names
+
+## Evidence
+
+- Pattern in TypeScript codebase
+
+---
+id: django-structure-explorer-vscode-instinct-constant-naming
+trigger: "When defining a constant"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Instinct Constant Naming
+
+## Action
+
+Use SCREAMING_SNAKE_CASE for constant names
+
+## Evidence
+
+- Pattern in TypeScript codebase
+
+---
+id: django-structure-explorer-vscode-instinct-import-style
+trigger: "When importing modules"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Instinct Import Style
+
+## Action
+
+Use relative import paths
+
+## Evidence
+
+- Pattern in TypeScript codebase
+
+---
+id: django-structure-explorer-vscode-instinct-export-style
+trigger: "When exporting from a module"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Instinct Export Style
+
+## Action
+
+Use named exports
+
+## Evidence
+
+- Pattern in TypeScript codebase
+
+---
+id: django-structure-explorer-vscode-instinct-test-file-pattern
+trigger: "When adding or updating a test file"
+confidence: 0.85
+domain: testing
+source: repo-analysis
+source_repo: Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Instinct Test File Pattern
+
+## Action
+
+Name the test file with a .test.ts suffix and colocate it with the code under src/test/
+
+## Evidence
+
+- Pattern in files: src/test/analyzer.test.ts
+
+---
+id: django-structure-explorer-vscode-instinct-test-framework
+trigger: "When writing tests"
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Instinct Test Framework
+
+## Action
+
+Use the Mocha testing framework
+
+## Evidence
+
+- mocha listed as framework
+- Pattern in test files
+
+---
+id: django-structure-explorer-vscode-instinct-test-types
+trigger: "When designing tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Instinct Test Types
+
+## Action
+
+Include both unit and integration tests as appropriate
+
+## Evidence
+
+- testTypes: unit, integration
+
+---
+id: django-structure-explorer-vscode-instinct-git-commit-format
+trigger: "When making a commit"
+confidence: 0.9
+domain: git
+source: repo-analysis
+source_repo: Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Instinct Git Commit Format
+
+## Action
+
+Follow conventional commits with prefixes: fix, feat, chore
+
+## Evidence
+
+- Pattern in commits: fix: ..., feat: ..., chore: ...
+
+---
+id: django-structure-explorer-vscode-instinct-git-commit-length
+trigger: "When writing a commit message"
+confidence: 0.7
+domain: git
+source: repo-analysis
+source_repo: Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Instinct Git Commit Length
+
+## Action
+
+Keep the commit message concise, around 69 characters on average
+
+## Evidence
+
+- averageLength: 69
+
+---
+id: django-structure-explorer-vscode-instinct-feature-bugfix-workflow
+trigger: "When adding a new feature or fixing a bug that requires documentation and verification"
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Instinct Feature Bugfix Workflow
+
+## Action
+
+Edit/add implementation files, update/add corresponding tests, and update CHANGELOG.md
+
+## Evidence
+
+- Workflow: feature-or-bugfix-with-tests-and-changelog
+- Pattern in commit sequences involving src/*.ts, src/test/*.test.ts, CHANGELOG.md
+
+---
+id: django-structure-explorer-vscode-instinct-update-ignore-workflow
+trigger: "When needing to exclude or include files for git or VSIX packaging"
+confidence: 0.85
+domain: workflow
+source: repo-analysis
+source_repo: Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Instinct Update Ignore Workflow
+
+## Action
+
+Edit .gitignore and .vscodeignore to add or remove patterns
+
+## Evidence
+
+- Workflow: update-ignore-files
+- Pattern in commit sequences involving .gitignore, .vscodeignore
+
+---
+id: django-structure-explorer-vscode-instinct-release-version-update-workflow
+trigger: "When preparing to publish a new release"
+confidence: 0.85
+domain: workflow
+source: repo-analysis
+source_repo: Dos2Locos/django-structure-explorer-vscode
+---
+
+# Django Structure Explorer Vscode Instinct Release Version Update Workflow
+
+## Action
+
+Update CHANGELOG.md with release notes and bump the version in package.json
+
+## Evidence
+
+- Workflow: release-version-update
+- Pattern in commit sequences involving CHANGELOG.md, package.json
+
