@@ -1613,7 +1613,12 @@ export class DjangoProjectAnalyzer {
           if (entry.name.startsWith('.') || EXCLUDED_DIRS.has(entry.name)) {
             continue;
           }
-          files.push(...await this.findTemplateFiles(fullPath, depth + 1));
+          // Acumular sin spread: `push(...arr)` se traduce en push.apply y, con
+          // miles de entradas, desborda el límite de argumentos del motor
+          // ("Maximum call stack size exceeded") en proyectos grandes.
+          for (const file of await this.findTemplateFiles(fullPath, depth + 1)) {
+            files.push(file);
+          }
         } else if (entry.isFile() && entry.name.endsWith('.html')) {
           files.push(fullPath);
         }
@@ -1658,9 +1663,13 @@ export class DjangoProjectAnalyzer {
         ) {
           dirs.push(fullPath);
 
-          // Recursivamente buscar en subdirectorios
+          // Recursivamente buscar en subdirectorios. Acumular sin spread:
+          // `push(...subdirs)` desborda el límite de argumentos del motor
+          // ("Maximum call stack size exceeded") cuando hay miles de directorios.
           const subdirs = await this.getDirectories(fullPath, depth + 1);
-          dirs.push(...subdirs);
+          for (const sub of subdirs) {
+            dirs.push(sub);
+          }
         }
       }
     } catch (error) {
