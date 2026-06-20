@@ -24,6 +24,9 @@ class EventEmitterStub {
   dispose = (): void => undefined;
 }
 
+// Las claves replican a propósito la API real de `vscode` (clases y enums en
+// PascalCase), así que aquí se exime la regla de nomenclatura camelCase.
+/* eslint-disable @typescript-eslint/naming-convention */
 const vscodeStub = {
   window: {
     showErrorMessage: (): undefined => undefined
@@ -37,6 +40,7 @@ const vscodeStub = {
   EventEmitter: EventEmitterStub,
   Uri: { file: (p: string): { fsPath: string } => ({ fsPath: p }) }
 };
+/* eslint-enable @typescript-eslint/naming-convention */
 
 const moduleRef = Module as unknown as {
   _load: (request: string, parent: unknown, isMain: boolean) => unknown;

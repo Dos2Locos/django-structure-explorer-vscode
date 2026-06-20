@@ -135,7 +135,26 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
     // llamada async, así que se usa una referencia estable durante todo el método.
     const projectRoot = this.projectRoot;
     if (!projectRoot) {
-      return [];
+      // No se encontró manage.py: el workspace no es un proyecto Django. En vez
+      // de un árbol vacío y silencioso, en el nivel raíz se muestra un item
+      // informativo que orienta al usuario (las ramas hijas no aplican).
+      if (element) {
+        return [];
+      }
+      const emptyItem = new DjangoTreeItem(
+        'No se detectó un proyecto Django',
+        vscode.TreeItemCollapsibleState.None,
+        undefined,
+        undefined,
+        'empty'
+      );
+      emptyItem.description = 'no se encontró manage.py';
+      emptyItem.tooltip =
+        'No se encontró ningún manage.py en el workspace. Abre una carpeta que ' +
+        'contenga manage.py (también se detecta en subcarpetas como backend/ o src/) ' +
+        'y usa el botón de recargar.';
+      emptyItem.iconPath = new vscode.ThemeIcon('info');
+      return [emptyItem];
     }
 
     // Afina el escaneo con los patrones del .gitignore antes de listar apps,

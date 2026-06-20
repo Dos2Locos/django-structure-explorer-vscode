@@ -238,7 +238,10 @@ export class DjangoProjectAnalyzer {
   }
 
   /**
-   * Busca todos los archivos settings.py en el proyecto
+   * Busca los ficheros de configuración del proyecto: el `settings.py` plano o,
+   * en proyectos con paquete de settings dividido (`config/settings/`), un
+   * módulo representativo del paquete (`base.py`, si no `__init__.py`, si no el
+   * primer `.py`). Así el nodo Settings también aparece en ese layout.
    */
   async findSettingsFiles(projectRoot: string): Promise<string[]> {
     const settingsFiles: string[] = [];
@@ -248,10 +251,40 @@ export class DjangoProjectAnalyzer {
       const settingsPath = path.join(dir, 'settings.py');
       if (await pathExists(settingsPath)) {
         settingsFiles.push(settingsPath);
+        continue;
+      }
+      const splitSettings = await this.findSplitSettingsModule(path.join(dir, 'settings'));
+      if (splitSettings) {
+        settingsFiles.push(splitSettings);
       }
     }
 
     return settingsFiles;
+  }
+
+  /**
+   * Dado un directorio `settings/`, devuelve el módulo más representativo para
+   * abrir/analizar (`base.py` → `__init__.py` → primer `.py`), o `undefined` si
+   * no es un paquete de settings (no existe o no contiene módulos Python).
+   */
+  private async findSplitSettingsModule(settingsDir: string): Promise<string | undefined> {
+    try {
+      const stat = await fs.promises.stat(settingsDir);
+      if (!stat.isDirectory()) {
+        return undefined;
+      }
+      const entries = await readdir(settingsDir, { withFileTypes: true });
+      const pyFiles = entries
+        .filter(entry => entry.isFile() && entry.name.endsWith('.py'))
+        .map(entry => entry.name);
+      if (pyFiles.length === 0) {
+        return undefined;
+      }
+      const preferred = ['base.py', '__init__.py'].find(name => pyFiles.includes(name));
+      return path.join(settingsDir, preferred ?? pyFiles.sort()[0]);
+    } catch {
+      return undefined;
+    }
   }
 
   /**

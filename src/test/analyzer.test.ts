@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import { DjangoProjectAnalyzer, DEFAULT_EXCLUDED_DIRS } from '../djangoProjectAnalyzer';
-import { findManagePyDir } from '../djangoStructureProvider';
+import { findManagePyDir, DjangoStructureProvider } from '../djangoStructureProvider';
 
 // __dirname en runtime = <root>/out/test ; los fixtures viven en src/test (no se compilan).
 const FIXTURES = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'criticalapp');
@@ -454,6 +454,35 @@ describe('DjangoProjectAnalyzer — red de seguridad de parsing (Fase 4)', () =>
       const local = new DjangoProjectAnalyzer();
       const mainUrls = await local.findMainUrlsFile(FIXTURES_SPLIT);
       assert.ok(!mainUrls!.replace(/\\/g, '/').includes('blogapp'), 'blogapp/urls.py no es la raíz');
+    });
+
+    it('findSettingsFiles surfacea un módulo del paquete settings/ dividido', async () => {
+      const local = new DjangoProjectAnalyzer();
+      const settingsFiles = await local.findSettingsFiles(FIXTURES_SPLIT);
+      const normalized = settingsFiles.map(f => f.replace(/\\/g, '/'));
+      assert.ok(
+        normalized.some(f => f.endsWith('splitsettings/config/settings/base.py')),
+        'debe surfacear config/settings/base.py para que aparezca el nodo Settings'
+      );
+    });
+  });
+
+  // Workspace que no es un proyecto Django: en el stub de tests
+  // workspace.workspaceFolders es undefined, así que no hay manage.py.
+  describe('Vista sin proyecto Django', () => {
+    it('muestra un item informativo en la raíz en vez de un árbol vacío', async () => {
+      const provider = new DjangoStructureProvider();
+      const children = await provider.getChildren();
+      assert.strictEqual(children.length, 1, 'debe haber un único item informativo');
+      assert.strictEqual(children[0].contextValue, 'empty', 'el item debe marcarse como vacío');
+      assert.ok(!children[0].command, 'el item informativo no debe ser clicable');
+    });
+
+    it('no expande ramas hijas cuando no hay proyecto', async () => {
+      const provider = new DjangoStructureProvider();
+      const [info] = await provider.getChildren();
+      const grandchildren = await provider.getChildren(info);
+      assert.deepStrictEqual(grandchildren, [], 'sin proyecto no hay nodos hijos');
     });
   });
 
