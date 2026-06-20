@@ -125,7 +125,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       // Registrar el error completo (con `stack`) para ver el stacktrace en la
       // consola de Developer Tools; el mensaje breve va al aviso al usuario.
       console.error('[DjangoStructureExplorer] Error en getChildren:', error);
-      vscode.window.showErrorMessage(`Django Structure Explorer: error inesperado. ${message}`);
+      vscode.window.showErrorMessage(vscode.l10n.t('Django Structure Explorer: unexpected error. {0}', message));
       return [];
     }
   }
@@ -142,17 +142,18 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
         return [];
       }
       const emptyItem = new DjangoTreeItem(
-        'No se detectó un proyecto Django',
+        vscode.l10n.t('No Django project detected'),
         vscode.TreeItemCollapsibleState.None,
         undefined,
         undefined,
         'empty'
       );
-      emptyItem.description = 'no se encontró manage.py';
-      emptyItem.tooltip =
-        'No se encontró ningún manage.py en el workspace. Abre una carpeta que ' +
-        'contenga manage.py (también se detecta en subcarpetas como backend/ o src/) ' +
-        'y usa el botón de recargar.';
+      emptyItem.description = vscode.l10n.t('manage.py not found');
+      emptyItem.tooltip = vscode.l10n.t(
+        'No manage.py was found in the workspace. Open a folder that contains ' +
+        'manage.py (it is also detected in subfolders such as backend/ or src/) ' +
+        'and use the reload button.'
+      );
       emptyItem.iconPath = new vscode.ThemeIcon('info');
       return [emptyItem];
     }
@@ -181,7 +182,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       const settingsFiles = await this.analyzer.findSettingsFiles(projectRoot);
       if (settingsFiles.length > 0) {
         const settingsItem = new DjangoTreeItem(
-          'Settings',
+          vscode.l10n.t('Settings'),
           vscode.TreeItemCollapsibleState.Collapsed,
           {
             command: 'djangoStructureExplorer.openFile',
@@ -199,7 +200,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       const mainUrlsFile = await this.analyzer.findMainUrlsFile(projectRoot);
       if (mainUrlsFile) {
         const urlsItem = new DjangoTreeItem(
-          'URLs',
+          vscode.l10n.t('URLs'),
           vscode.TreeItemCollapsibleState.Collapsed,
           {
             command: 'djangoStructureExplorer.openFile',
@@ -318,7 +319,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
 
     // Add configuration files group
     const configItem = new DjangoTreeItem(
-      'Configuration',
+      vscode.l10n.t('Configuration'),
       vscode.TreeItemCollapsibleState.Expanded,  // Mostrar expandido por defecto
       undefined,
       undefined,
@@ -329,7 +330,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
 
     // Add applications group
     const appsItem = new DjangoTreeItem(
-      'Applications',
+      vscode.l10n.t('Applications'),
       vscode.TreeItemCollapsibleState.Expanded,  // Mostrar expandido por defecto
       undefined,
       undefined,
@@ -377,7 +378,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
     const modelsPath = path.join(appPath, 'models.py');
     if (await pathExists(modelsPath)) {
       const modelsItem = new DjangoTreeItem(
-        'Models',
+        vscode.l10n.t('Models'),
         vscode.TreeItemCollapsibleState.Collapsed,
         {
           command: 'djangoStructureExplorer.openFile',
@@ -395,7 +396,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
     const viewsPath = path.join(appPath, 'views.py');
     if (await pathExists(viewsPath)) {
       const viewsItem = new DjangoTreeItem(
-        'Views',
+        vscode.l10n.t('Views'),
         vscode.TreeItemCollapsibleState.Collapsed,
         {
           command: 'djangoStructureExplorer.openFile',
@@ -413,7 +414,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
     const urlsPath = path.join(appPath, 'urls.py');
     if (await pathExists(urlsPath)) {
       const urlsItem = new DjangoTreeItem(
-        'URLs',
+        vscode.l10n.t('URLs'),
         vscode.TreeItemCollapsibleState.Collapsed,
         {
           command: 'djangoStructureExplorer.openFile',
@@ -431,7 +432,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
     const adminPath = path.join(appPath, 'admin.py');
     if (await pathExists(adminPath)) {
       const adminItem = new DjangoTreeItem(
-        'Admin',
+        vscode.l10n.t('Admin'),
         vscode.TreeItemCollapsibleState.Collapsed,
         {
           command: 'djangoStructureExplorer.openFile',
@@ -449,7 +450,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
     const tasksPath = path.join(appPath, 'tasks.py');
     if (await pathExists(tasksPath)) {
       const tasksItem = new DjangoTreeItem(
-        'Tasks',
+        vscode.l10n.t('Tasks'),
         vscode.TreeItemCollapsibleState.Collapsed,
         {
           command: 'djangoStructureExplorer.openFile',
@@ -468,7 +469,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
     const partials = await this.analyzer.findAppPartials(appPath);
     if (partials.length > 0) {
       const partialsItem = new DjangoTreeItem(
-        'Partials',
+        vscode.l10n.t('Partials'),
         vscode.TreeItemCollapsibleState.Collapsed,
         undefined,
         vscode.Uri.file(appPath),
@@ -483,7 +484,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
     const templateFiles = await this.analyzer.findAppTemplates(appPath);
     if (templateFiles.length > 0) {
       const templatesItem = new DjangoTreeItem(
-        'Templates',
+        vscode.l10n.t('Templates'),
         vscode.TreeItemCollapsibleState.Collapsed,
         undefined,
         vscode.Uri.file(appPath),
@@ -497,7 +498,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
     const serializersPath = path.join(appPath, 'serializers.py');
     if (await pathExists(serializersPath)) {
       const serializersItem = new DjangoTreeItem(
-        'Serializers',
+        vscode.l10n.t('Serializers'),
         vscode.TreeItemCollapsibleState.Collapsed,
         {
           command: 'djangoStructureExplorer.openFile',
@@ -515,7 +516,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
     const schemasPath = path.join(appPath, 'schemas.py');
     if (await pathExists(schemasPath)) {
       const schemasItem = new DjangoTreeItem(
-        'Schemas',
+        vscode.l10n.t('Schemas'),
         vscode.TreeItemCollapsibleState.Collapsed,
         {
           command: 'djangoStructureExplorer.openFile',
@@ -545,7 +546,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
     }
     if (apiEndpoints.length > 0) {
       const apiItem = new DjangoTreeItem(
-        'API',
+        vscode.l10n.t('API'),
         vscode.TreeItemCollapsibleState.Collapsed,
         undefined,
         vscode.Uri.file(appPath),
@@ -560,7 +561,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
     const formsPath = path.join(appPath, 'forms.py');
     if (await pathExists(formsPath)) {
       const formsItem = new DjangoTreeItem(
-        'Forms',
+        vscode.l10n.t('Forms'),
         vscode.TreeItemCollapsibleState.Collapsed,
         {
           command: 'djangoStructureExplorer.openFile',
@@ -578,7 +579,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
     const signalsPath = path.join(appPath, 'signals.py');
     if (await pathExists(signalsPath)) {
       const signalsItem = new DjangoTreeItem(
-        'Signals',
+        vscode.l10n.t('Signals'),
         vscode.TreeItemCollapsibleState.Collapsed,
         {
           command: 'djangoStructureExplorer.openFile',
@@ -596,7 +597,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
     const commands = await this.analyzer.findManagementCommands(appPath);
     if (commands.length > 0) {
       const commandsItem = new DjangoTreeItem(
-        'Commands',
+        vscode.l10n.t('Commands'),
         vscode.TreeItemCollapsibleState.Collapsed,
         undefined,
         vscode.Uri.file(path.join(appPath, 'management', 'commands')),
@@ -613,7 +614,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       const celeryTasks = await this.analyzer.extractCeleryTasks(tasksPathForCelery);
       if (celeryTasks.length > 0) {
         const celeryItem = new DjangoTreeItem(
-          'Celery Tasks',
+          vscode.l10n.t('Celery Tasks'),
           vscode.TreeItemCollapsibleState.Collapsed,
           {
             command: 'djangoStructureExplorer.openFile',
@@ -653,8 +654,8 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       );
       modelItem.iconPath = new vscode.ThemeIcon('symbol-class');
 
-      modelItem.tooltip = `Model: ${model.name}`;
-      modelItem.description = `${fieldsData.length} fields`;
+      modelItem.tooltip = vscode.l10n.t('Model: {0}', model.name);
+      modelItem.description = vscode.l10n.t('{0} fields', fieldsData.length);
 
       // Almacenar los campos del modelo de forma tipada para acceso posterior
       modelItem.modelFields = fieldsData;
@@ -704,7 +705,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
         if (guarded) {
           viewItem.iconPath = new vscode.ThemeIcon('lock');
         }
-        viewItem.tooltip = `${view.name}\nDecoradores: ${decoLabel}`;
+        viewItem.tooltip = vscode.l10n.t('{0}\nDecorators: {1}', view.name, decoLabel);
       }
       if (parts.length > 0) {
         viewItem.description = parts.join(' · ');
@@ -862,7 +863,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
         vscode.Uri.file(signalsPath),
         'signal'
       );
-      item.description = signal.kind === 'receiver' ? 'receiver' : 'Signal';
+      item.description = signal.kind === 'receiver' ? vscode.l10n.t('receiver') : vscode.l10n.t('Signal');
       item.iconPath = new vscode.ThemeIcon(signal.kind === 'receiver' ? 'symbol-method' : 'broadcast');
       return item;
     });
@@ -1071,7 +1072,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
         vscode.TreeItemCollapsibleState.None,
         {
           command: 'djangoStructureExplorer.openFile',
-          title: 'Abrir Campo',
+          title: 'Open Field',
           arguments: [modelsPath, field.lineNumber]
         },
         vscode.Uri.file(modelsPath),
@@ -1085,8 +1086,11 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
         fieldItem.iconPath = new vscode.ThemeIcon('symbol-field');
       }
 
-      fieldItem.description = field.fieldType || 'Unknown';
-      fieldItem.tooltip = `${field.isProperty ? 'Propiedad' : 'Campo'}: ${field.name}\nTipo: ${field.fieldType || 'Unknown'}`;
+      fieldItem.description = field.fieldType || vscode.l10n.t('Unknown');
+      const fieldType = field.fieldType || vscode.l10n.t('Unknown');
+      fieldItem.tooltip = field.isProperty
+        ? vscode.l10n.t('Property: {0}\nType: {1}', field.name, fieldType)
+        : vscode.l10n.t('Field: {0}\nType: {1}', field.name, fieldType);
       return fieldItem;
     });
   }

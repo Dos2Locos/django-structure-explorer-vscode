@@ -1,0 +1,16 @@
+{
+  "configuration.title": "Django Structure Explorer",
+  "config.sortOrder.description": "Cómo ordenar los elementos en la vista de árbol",
+  "config.sortOrder.alphabetical": "Ordenar alfabéticamente (A-Z)",
+  "config.sortOrder.alphabeticalDesc": "Ordenar alfabéticamente (Z-A)",
+  "config.sortOrder.codeOrder": "Mantener el orden en que aparecen en el código",
+  "config.pythonPath.description": "Intérprete de Python para ejecutar los comandos de manage.py (p. ej. python, python3 o la ruta de un virtualenv). Ámbito de máquina: no se puede sobreescribir desde los ajustes del workspace.",
+  "viewContainer.title": "Django Explorer",
+  "view.name": "Django Explorer",
+  "command.refresh.title": "Recargar Django Explorer",
+  "command.openFile.title": "Abrir archivo",
+  "command.runManageCommand.title": "Django: Ejecutar comando de manage.py",
+  "command.runCustomCommand.title": "Django: Ejecutar este comando de gestión",
+  "command.filter.title": "Django: Filtrar el explorador",
+  "command.clearFilter.title": "Django: Limpiar el filtro del explorador"
+}

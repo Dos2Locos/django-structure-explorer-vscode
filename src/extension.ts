@@ -21,17 +21,20 @@ async function pathExists(targetPath: string): Promise<boolean> {
 /**
  * Comandos de manage.py de uso frecuente ofrecidos en el QuickPick del runner.
  */
+// Las descripciones se escriben en inglés (idioma fuente de la localización) y
+// se traducen en tiempo de ejecución con vscode.l10n.t() al construir el
+// QuickPick (durante la activación, cuando el bundle ya está cargado).
 const COMMON_MANAGE_COMMANDS: ReadonlyArray<{ command: string; description: string }> = [
-  { command: 'runserver', description: 'Iniciar el servidor de desarrollo' },
-  { command: 'makemigrations', description: 'Crear migraciones a partir de los modelos' },
-  { command: 'migrate', description: 'Aplicar migraciones a la base de datos' },
-  { command: 'showmigrations', description: 'Mostrar el estado de las migraciones' },
-  { command: 'shell', description: 'Abrir el shell interactivo de Django' },
-  { command: 'dbshell', description: 'Abrir el shell de la base de datos' },
-  { command: 'createsuperuser', description: 'Crear un superusuario' },
-  { command: 'collectstatic', description: 'Recopilar los ficheros estáticos' },
-  { command: 'check', description: 'Comprobar el proyecto en busca de problemas' },
-  { command: 'test', description: 'Ejecutar la batería de tests' }
+  { command: 'runserver', description: 'Start the development server' },
+  { command: 'makemigrations', description: 'Create migrations from your models' },
+  { command: 'migrate', description: 'Apply migrations to the database' },
+  { command: 'showmigrations', description: 'Show the migration status' },
+  { command: 'shell', description: 'Open the interactive Django shell' },
+  { command: 'dbshell', description: 'Open the database shell' },
+  { command: 'createsuperuser', description: 'Create a superuser' },
+  { command: 'collectstatic', description: 'Collect static files' },
+  { command: 'check', description: 'Check the project for problems' },
+  { command: 'test', description: 'Run the test suite' }
 ];
 
 /** Terminal reutilizable para los comandos de manage.py. */
@@ -94,7 +97,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   const syncFilterDescription = () => {
     const filter = djangoStructureProvider.currentFilter;
-    treeView.description = filter ? `filtro: ${filter}` : undefined;
+    treeView.description = filter ? vscode.l10n.t('filter: {0}', filter) : undefined;
   };
 
   context.subscriptions.push(
@@ -113,7 +116,7 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('djangoStructureExplorer.refresh', () => djangoStructureProvider.refresh()),
     vscode.commands.registerCommand('djangoStructureExplorer.openFile', async (filePath: string, lineNumber?: number) => {
       if (!(await pathExists(filePath))) {
-        vscode.window.showErrorMessage(`El archivo ${filePath} no existe.`);
+        vscode.window.showErrorMessage(vscode.l10n.t('The file {0} does not exist.', filePath));
         return;
       }
       const doc = await vscode.workspace.openTextDocument(filePath);
@@ -129,19 +132,19 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('djangoStructureExplorer.runManageCommand', async () => {
       const projectRoot = djangoStructureProvider.getProjectRoot();
       if (!projectRoot) {
-        vscode.window.showErrorMessage('Django Structure Explorer: no se encontró manage.py en el workspace.');
+        vscode.window.showErrorMessage(vscode.l10n.t('Django Structure Explorer: manage.py not found in the workspace.'));
         return;
       }
 
       const items: vscode.QuickPickItem[] = COMMON_MANAGE_COMMANDS.map(c => ({
         label: c.command,
-        description: c.description
+        description: vscode.l10n.t(c.description)
       }));
-      const customLabel = '$(pencil) Otro comando…';
-      items.push({ label: customLabel, description: 'Escribir un comando de manage.py personalizado' });
+      const customLabel = `$(pencil) ${vscode.l10n.t('Other command…')}`;
+      items.push({ label: customLabel, description: vscode.l10n.t('Type a custom manage.py command') });
 
       const picked = await vscode.window.showQuickPick(items, {
-        placeHolder: 'Selecciona un comando de manage.py'
+        placeHolder: vscode.l10n.t('Select a manage.py command')
       });
       if (!picked) {
         return;
@@ -150,8 +153,8 @@ export function activate(context: vscode.ExtensionContext) {
       let commandLine = picked.label;
       if (picked.label === customLabel) {
         const input = await vscode.window.showInputBox({
-          prompt: 'Comando de manage.py (con argumentos)',
-          placeHolder: 'p. ej. loaddata fixtures/initial.json'
+          prompt: vscode.l10n.t('manage.py command (with arguments)'),
+          placeHolder: vscode.l10n.t('e.g. loaddata fixtures/initial.json')
         });
         if (!input || !input.trim()) {
           return;
@@ -161,7 +164,7 @@ export function activate(context: vscode.ExtensionContext) {
         // libres a propósito: el usuario los teclea para su propia terminal.
         const commandName = commandLine.split(/\s+/)[0];
         if (!VALID_COMMAND_NAME.test(commandName)) {
-          vscode.window.showErrorMessage(`Django Structure Explorer: nombre de comando no válido: ${commandName}`);
+          vscode.window.showErrorMessage(vscode.l10n.t('Django Structure Explorer: invalid command name: {0}', commandName));
           return;
         }
       }
@@ -172,7 +175,7 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('djangoStructureExplorer.runCustomCommand', (item?: DjangoTreeItem) => {
       const projectRoot = djangoStructureProvider.getProjectRoot();
       if (!projectRoot) {
-        vscode.window.showErrorMessage('Django Structure Explorer: no se encontró manage.py en el workspace.');
+        vscode.window.showErrorMessage(vscode.l10n.t('Django Structure Explorer: manage.py not found in the workspace.'));
         return;
       }
       const name = item?.label?.toString();
@@ -180,7 +183,7 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
       if (!VALID_COMMAND_NAME.test(name)) {
-        vscode.window.showErrorMessage(`Django Structure Explorer: nombre de comando no válido: ${name}`);
+        vscode.window.showErrorMessage(vscode.l10n.t('Django Structure Explorer: invalid command name: {0}', name));
         return;
       }
       runManagePy(projectRoot, name);
@@ -188,8 +191,8 @@ export function activate(context: vscode.ExtensionContext) {
     // Fase D: filtrar / limpiar el filtro de los items hoja del árbol.
     vscode.commands.registerCommand('djangoStructureExplorer.filter', async () => {
       const input = await vscode.window.showInputBox({
-        prompt: 'Filtrar elementos del árbol por nombre',
-        placeHolder: 'Texto a buscar (vacío para limpiar)',
+        prompt: vscode.l10n.t('Filter tree items by name'),
+        placeHolder: vscode.l10n.t('Search text (empty to clear)'),
         value: djangoStructureProvider.currentFilter
       });
       if (input === undefined) {
