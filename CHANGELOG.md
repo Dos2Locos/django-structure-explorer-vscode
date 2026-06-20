@@ -4,6 +4,25 @@ Todas las novedades relevantes de la extensión se documentan en este archivo.
 El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/)
 y el proyecto se adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
+## [1.5.1] - 2026-06-20
+
+### Añadido
+- **Mensaje cuando el workspace no es un proyecto Django.** Si no se encuentra
+  ningún `manage.py`, la vista muestra un item informativo ("No se detectó un
+  proyecto Django") con una pista de uso, en lugar de un árbol vacío y silencioso.
+
+### Corregido
+- **Nodo Settings en proyectos con settings dividido.** `findSettingsFiles`
+  reconoce ahora los paquetes `config/settings/` (eligiendo `base.py`, si no
+  `__init__.py`, si no el primer `.py`), de modo que el nodo Configuration >
+  Settings también aparece en ese layout —igual que ya se arregló el nodo URLs
+  en la 1.5.0.
+
+### Interno
+- Actions de CI a `v5` (`checkout`, `setup-node`; Node 24) y `node-version` a 22,
+  resolviendo el aviso de deprecación de Node 20. `eslint-disable` acotado en el
+  stub de `vscode` de los tests (sus claves replican la API real en PascalCase).
+
 ## [1.5.0] - 2026-06-20
 
 ### Añadido
