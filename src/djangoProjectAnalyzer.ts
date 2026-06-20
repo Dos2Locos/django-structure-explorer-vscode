@@ -41,7 +41,7 @@ function reportError(context: string, error: unknown): void {
   // Registrar el objeto error completo (incluye `stack`): así el stacktrace
   // aparece expandible en la consola de Developer Tools, no solo el mensaje.
   console.error(`${context}:`, error);
-  vscode.window.showErrorMessage(`Django Structure Explorer: ${context}. ${message}`);
+  vscode.window.showErrorMessage(vscode.l10n.t('Django Structure Explorer: {0}. {1}', context, message));
 }
 
 export interface DjangoModel {

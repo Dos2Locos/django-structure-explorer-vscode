@@ -1,0 +1,16 @@
+{
+  "configuration.title": "Django Structure Explorer",
+  "config.sortOrder.description": "How to sort items in the tree view",
+  "config.sortOrder.alphabetical": "Sort items alphabetically (A-Z)",
+  "config.sortOrder.alphabeticalDesc": "Sort items alphabetically (Z-A)",
+  "config.sortOrder.codeOrder": "Keep items in the order they appear in code",
+  "config.pythonPath.description": "Python interpreter used to run manage.py commands (e.g. python, python3, or a virtualenv path). Machine-scoped: cannot be overridden by workspace settings.",
+  "viewContainer.title": "Django Explorer",
+  "view.name": "Django Explorer",
+  "command.refresh.title": "Refresh Django Explorer",
+  "command.openFile.title": "Open File",
+  "command.runManageCommand.title": "Django: Run manage.py Command",
+  "command.runCustomCommand.title": "Django: Run This Management Command",
+  "command.filter.title": "Django: Filter Explorer",
+  "command.clearFilter.title": "Django: Clear Explorer Filter"
+}

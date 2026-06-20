@@ -2,14 +2,14 @@
   "name": "django-structure-explorer",
   "displayName": "Django Structure Explorer",
   "description": "PyCharm-style Django project structure explorer for VSCode",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "publisher": "Dos2Locos",
   "repository": {
     "type": "git",
     "url": "https://github.com/Dos2Locos/django-structure-explorer-vscode.git"
   },
   "engines": {
-    "vscode": "^1.60.0"
+    "vscode": "^1.73.0"
   },
   "categories": [
     "Other"
@@ -22,9 +22,10 @@
   ],
   "main": "./out/extension.js",
   "icon": "resources/django.png",
+  "l10n": "./l10n",
   "contributes": {
     "configuration": {
-      "title": "Django Structure Explorer",
+      "title": "%configuration.title%",
       "properties": {
         "djangoStructureExplorer.sortOrder": {
           "type": "string",
@@ -35,17 +36,17 @@
             "codeOrder"
           ],
           "enumDescriptions": [
-            "Sort items alphabetically (A-Z)",
-            "Sort items alphabetically (Z-A)",
-            "Keep items in the order they appear in code"
+            "%config.sortOrder.alphabetical%",
+            "%config.sortOrder.alphabeticalDesc%",
+            "%config.sortOrder.codeOrder%"
           ],
-          "description": "How to sort items in the tree view"
+          "description": "%config.sortOrder.description%"
         },
         "djangoStructureExplorer.pythonPath": {
           "type": "string",
           "default": "python",
           "scope": "machine",
-          "description": "Python interpreter used to run manage.py commands (e.g. python, python3, or a virtualenv path). Machine-scoped: cannot be overridden by workspace settings."
+          "description": "%config.pythonPath.description%"
         }
       }
     },
@@ -53,7 +54,7 @@
       "activitybar": [
         {
           "id": "django-explorer",
-          "title": "Django Explorer",
+          "title": "%viewContainer.title%",
           "icon": "resources/activity-icon.svg"
         }
       ]
@@ -62,7 +63,7 @@
       "django-explorer": [
         {
           "id": "djangoStructureExplorer",
-          "name": "Django Explorer"
+          "name": "%view.name%"
         }
       ]
     },
@@ -77,31 +78,31 @@
     "commands": [
       {
         "command": "djangoStructureExplorer.refresh",
-        "title": "Refresh Django Explorer",
+        "title": "%command.refresh.title%",
         "icon": "$(refresh)"
       },
       {
         "command": "djangoStructureExplorer.openFile",
-        "title": "Open File"
+        "title": "%command.openFile.title%"
       },
       {
         "command": "djangoStructureExplorer.runManageCommand",
-        "title": "Django: Run manage.py Command",
+        "title": "%command.runManageCommand.title%",
         "icon": "$(run)"
       },
       {
         "command": "djangoStructureExplorer.runCustomCommand",
-        "title": "Django: Run This Management Command",
+        "title": "%command.runCustomCommand.title%",
         "icon": "$(run)"
       },
       {
         "command": "djangoStructureExplorer.filter",
-        "title": "Django: Filter Explorer",
+        "title": "%command.filter.title%",
         "icon": "$(filter)"
       },
       {
         "command": "djangoStructureExplorer.clearFilter",
-        "title": "Django: Clear Explorer Filter",
+        "title": "%command.clearFilter.title%",
         "icon": "$(clear-all)"
       }
     ],
@@ -155,7 +156,7 @@
     "@types/glob": "^7.1.3",
     "@types/mocha": "^8.2.2",
     "@types/node": "14.x",
-    "@types/vscode": "^1.60.0",
+    "@types/vscode": "^1.73.0",
     "@typescript-eslint/eslint-plugin": "^4.26.0",
     "@typescript-eslint/parser": "^4.26.0",
     "eslint": "^7.27.0",

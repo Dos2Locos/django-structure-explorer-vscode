@@ -34,6 +34,12 @@ const vscodeStub = {
   workspace: {
     workspaceFolders: undefined
   },
+  // Stub de vscode.l10n: sustituye los marcadores {n} por los argumentos, sin
+  // traducir (los tests se ejecutan en el idioma fuente, inglés).
+  l10n: {
+    t: (message: string, ...args: unknown[]): string =>
+      message.replace(/\{(\d+)\}/g, (_match, index) => String(args[Number(index)]))
+  },
   TreeItem: TreeItemStub,
   TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
   ThemeIcon: class { constructor(public id: string) {} },

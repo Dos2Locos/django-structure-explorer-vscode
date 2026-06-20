@@ -4,6 +4,22 @@ Todas las novedades relevantes de la extensión se documentan en este archivo.
 El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/)
 y el proyecto se adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
+## [1.6.0] - 2026-06-20
+
+### Añadido
+- **Localización multi-idioma (inglés y español).** La extensión se muestra en
+  el idioma de display de VS Code: inglés por defecto y **español** cuando el
+  editor está en español. Se traducen los títulos de comandos, el nombre de la
+  vista, las descripciones de ajustes, las secciones del árbol
+  (Configuration→Configuración, Applications→Aplicaciones, Models→Modelos…), los
+  mensajes de error, el runner de `manage.py` (QuickPick e InputBox) y el aviso
+  de "no es un proyecto Django". Implementado con `vscode.l10n` + bundles
+  (`package.nls*.json` y `l10n/bundle.l10n.es.json`).
+
+### Cambiado
+- **Versión mínima de VS Code: 1.73.0** (antes 1.60.0), requisito de la API
+  `vscode.l10n` de localización.
+
 ## [1.5.1] - 2026-06-20
 
 ### Añadido
