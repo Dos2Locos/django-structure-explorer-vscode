@@ -4,7 +4,7 @@ Todas las novedades relevantes de la extensión se documentan en este archivo.
 El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/)
 y el proyecto se adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
-## [Sin publicar]
+## [1.5.0] - 2026-06-20
 
 ### Añadido
 - **Localización recursiva de la raíz del proyecto.** Si `manage.py` no está en la
