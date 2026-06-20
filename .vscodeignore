@@ -12,6 +12,9 @@ vsc-extension-quickstart.md
 .git/**
 .github/**
 **/*.vsix
+**/*.log
+out/test/**
+.mocharc.json
 **/tsconfig.json
 **/.eslintrc.json
 **/*.map

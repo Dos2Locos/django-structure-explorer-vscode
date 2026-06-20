@@ -21,6 +21,18 @@ async function pathExists(targetPath: string): Promise<boolean> {
 }
 
 /**
+ * Directorios que el escaneo del proyecto omite siempre: dependencias, entornos
+ * virtuales, cachés y carpetas de build. Se exporta para que el localizador de
+ * la raíz (DjangoStructureProvider) reutilice la misma lista al descender en
+ * busca de manage.py. Los nombres con prefijo "." o "__" se filtran aparte.
+ */
+export const DEFAULT_EXCLUDED_DIRS: ReadonlySet<string> = new Set<string>([
+  'node_modules', 'venv', '.venv', 'env', 'site-packages',
+  '.git', '.tox', '.mypy_cache', '.pytest_cache', '__pycache__',
+  'migrations', 'build', 'dist', '.next', '.nuxt'
+]);
+
+/**
  * Registra un error y lo notifica al usuario, en lugar de tragárselo en silencio.
  * Así se distingue "no hay resultados" de "el parseo falló".
  */
@@ -59,6 +71,9 @@ export interface DjangoUrl {
   pattern: string;
   viewName: string;
   lineNumber: number;
+  // Fichero donde se declara esta URL. Difiere de la urls.py de cabecera cuando
+  // la ruta procede de un include(): así la navegación abre el fichero correcto.
+  filePath: string;
 }
 
 export interface DjangoAdminClass {
@@ -143,6 +158,85 @@ export interface DjangoLocation {
 
 export class DjangoProjectAnalyzer {
 
+  /** Nombres de directorio a ignorar, derivados de los .gitignore del proyecto. */
+  private gitignoreDirs: Set<string> = new Set<string>();
+  /** Clave (conjunto de raíces) ya cargada, para evitar relecturas en cada escaneo. */
+  private gitignoreLoadedFor?: string;
+
+  /**
+   * Carga, una sola vez por conjunto de raíces, los nombres de directorio
+   * declarados en los .gitignore del proyecto para sumarlos a la exclusión del
+   * escaneo. Se aceptan varias raíces porque en monorepos con proyecto anidado
+   * (p. ej. `manage.py` en `backend/`) el `.gitignore` suele vivir en la raíz
+   * del workspace, no junto al proyecto; se leen ambos y se fusionan. Es
+   * conservador a propósito: solo considera entradas que nombran un directorio
+   * de forma inequívoca (sin globs, sin separadores de ruta intermedios y sin
+   * negaciones), de modo que la comparación por nombre no produzca falsos
+   * positivos. La ausencia o el fallo de lectura de un fichero no es un error.
+   */
+  async loadIgnorePatterns(roots: string | string[]): Promise<void> {
+    const rootList = (typeof roots === 'string' ? [roots] : roots).filter(Boolean);
+    // Clave estable e independiente del orden de las raíces.
+    const cacheKey = [...new Set(rootList)].sort().join('\0');
+    if (this.gitignoreLoadedFor === cacheKey) {
+      return;
+    }
+    this.gitignoreLoadedFor = cacheKey;
+
+    const dirs = new Set<string>();
+    for (const root of new Set(rootList)) {
+      await this.collectGitignoreDirs(root, dirs);
+    }
+    this.gitignoreDirs = dirs;
+  }
+
+  /**
+   * Lee el `.gitignore` de `root` (si existe) y vuelca en `target` los nombres
+   * de directorio inequívocos. No lanza: un fichero ausente o ilegible se ignora.
+   */
+  private async collectGitignoreDirs(root: string, target: Set<string>): Promise<void> {
+    const gitignorePath = path.join(root, '.gitignore');
+    if (!(await pathExists(gitignorePath))) {
+      return;
+    }
+
+    try {
+      const content = await readFile(gitignorePath, 'utf8');
+      for (const rawLine of content.split(/\r?\n/)) {
+        const line = rawLine.trim();
+        // Saltar líneas vacías, comentarios y reglas de negación.
+        if (!line || line.startsWith('#') || line.startsWith('!')) {
+          continue;
+        }
+        // Quitar la barra final que en .gitignore marca "esto es un directorio".
+        const entry = line.replace(/\/+$/, '');
+        // Solo nombres simples: descartar globs y rutas ancladas o anidadas.
+        if (!entry || entry.includes('/') || /[*?[\]]/.test(entry)) {
+          continue;
+        }
+        target.add(entry);
+      }
+    } catch (error) {
+      // Un .gitignore ilegible no debe romper el escaneo del proyecto.
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[DjangoStructureExplorer] No se pudo leer .gitignore en "${root}": ${message}`);
+    }
+  }
+
+  /**
+   * Indica si un directorio debe omitirse durante el escaneo: ocultos (.*),
+   * dunder (__pycache__, etc.), la lista por defecto de directorios pesados y
+   * los nombres derivados del .gitignore del proyecto.
+   */
+  private isScanExcludedDir(name: string): boolean {
+    return (
+      name.startsWith('.') ||
+      name.startsWith('__') ||
+      DEFAULT_EXCLUDED_DIRS.has(name) ||
+      this.gitignoreDirs.has(name)
+    );
+  }
+
   /**
    * Busca todos los archivos settings.py en el proyecto
    */
@@ -161,13 +255,43 @@ export class DjangoProjectAnalyzer {
   }
 
   /**
+   * Indica si `dir` es el paquete de configuración del proyecto: contiene un
+   * `settings.py` plano o un paquete de settings dividido `settings/` (con al
+   * menos un módulo `.py`, p. ej. `config/settings/base.py`). Sirve para
+   * distinguir el `urls.py` raíz del de una app cualquiera.
+   */
+  private async isConfigPackage(dir: string): Promise<boolean> {
+    // Layout clásico: config/settings.py junto al urls.py raíz.
+    if (await pathExists(path.join(dir, 'settings.py'))) {
+      return true;
+    }
+    // Layout dividido: config/settings/{__init__,base,prod}.py (paquete o
+    // namespace package). Se acepta si la carpeta contiene algún módulo Python.
+    const settingsDir = path.join(dir, 'settings');
+    try {
+      const stat = await fs.promises.stat(settingsDir);
+      if (!stat.isDirectory()) {
+        return false;
+      }
+      const entries = await readdir(settingsDir, { withFileTypes: true });
+      return entries.some(entry => entry.isFile() && entry.name.endsWith('.py'));
+    } catch {
+      // settings/ no existe o no es accesible: no es el paquete de configuración.
+      return false;
+    }
+  }
+
+  /**
    * Busca el archivo urls.py principal del proyecto
    */
   async findMainUrlsFile(projectRoot: string): Promise<string | undefined> {
     const dirs = await this.getDirectories(projectRoot);
     for (const dir of dirs) {
       const urlsPath = path.join(dir, 'urls.py');
-      if (await pathExists(urlsPath)) {
+      // El urls.py raíz vive en el paquete de configuración (junto a settings.py
+      // o a un paquete settings/ dividido); así se evita devolver el urls.py de
+      // la primera app en orden alfabético.
+      if (await pathExists(urlsPath) && await this.isConfigPackage(dir)) {
         // Verificar si es el urls.py principal (contiene ROOT_URLCONF o urlpatterns)
         const content = await readFile(urlsPath, 'utf8');
         if (content.includes('ROOT_URLCONF') || content.includes('urlpatterns')) {
@@ -530,7 +654,8 @@ export class DjangoProjectAnalyzer {
             urls.push({
               pattern: prefix + this.stringLiteralValue(patternNode),
               viewName: dottedName(viewNode),
-              lineNumber: call.startPosition.row
+              lineNumber: call.startPosition.row,
+              filePath: urlsPath
             });
           }
           continue;
@@ -545,7 +670,8 @@ export class DjangoProjectAnalyzer {
             urls.push({
               pattern: prefix + this.stringLiteralValue(patternNode),
               viewName: dottedName(viewNode),
-              lineNumber: call.startPosition.row
+              lineNumber: call.startPosition.row,
+              filePath: urlsPath
             });
           }
         }
@@ -1477,10 +1603,6 @@ export class DjangoProjectAnalyzer {
   private async findTemplateFiles(dir: string, depth: number = 0): Promise<string[]> {
     const files: string[] = [];
     const MAX_DEPTH = 8;
-    const EXCLUDED_DIRS = new Set<string>([
-      'node_modules', 'venv', '.venv', 'env', 'site-packages',
-      '.git', '.tox', '.mypy_cache', '.pytest_cache'
-    ]);
 
     if (depth > MAX_DEPTH) {
       return files;
@@ -1493,7 +1615,7 @@ export class DjangoProjectAnalyzer {
         const fullPath = path.join(dir, entry.name);
 
         if (entry.isDirectory()) {
-          if (entry.name.startsWith('.') || EXCLUDED_DIRS.has(entry.name)) {
+          if (this.isScanExcludedDir(entry.name)) {
             continue;
           }
           files.push(...await this.findTemplateFiles(fullPath, depth + 1));
@@ -1518,10 +1640,6 @@ export class DjangoProjectAnalyzer {
   private async getDirectories(dir: string, depth: number = 0): Promise<string[]> {
     const dirs: string[] = [];
     const MAX_DEPTH = 6;
-    const EXCLUDED_DIRS = new Set<string>([
-      'node_modules', 'venv', '.venv', 'env', 'site-packages',
-      '.git', '.tox', '.mypy_cache', '.pytest_cache', 'migrations'
-    ]);
 
     if (depth > MAX_DEPTH) {
       return dirs;
@@ -1533,12 +1651,7 @@ export class DjangoProjectAnalyzer {
       for (const entry of entries) {
         const fullPath = path.join(dir, entry.name);
 
-        if (
-          entry.isDirectory() &&
-          !entry.name.startsWith('.') &&
-          !entry.name.startsWith('__') &&
-          !EXCLUDED_DIRS.has(entry.name)
-        ) {
+        if (entry.isDirectory() && !this.isScanExcludedDir(entry.name)) {
           dirs.push(fullPath);
 
           // Recursivamente buscar en subdirectorios

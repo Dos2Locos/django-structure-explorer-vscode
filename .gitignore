@@ -3,3 +3,6 @@ node_modules
 .vscode-test/
 *.vsix
 .claude/
+# Logs locales de VS Code u otras herramientas: nunca deben commitearse
+# (pueden contener rutas/datos del proyecto) ni acabar en el .vsix.
+*.log

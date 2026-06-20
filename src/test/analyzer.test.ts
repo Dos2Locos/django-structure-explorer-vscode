@@ -1,6 +1,9 @@
 import * as assert from 'assert';
 import * as path from 'path';
-import { DjangoProjectAnalyzer } from '../djangoProjectAnalyzer';
+import * as os from 'os';
+import * as fs from 'fs';
+import { DjangoProjectAnalyzer, DEFAULT_EXCLUDED_DIRS } from '../djangoProjectAnalyzer';
+import { findManagePyDir } from '../djangoStructureProvider';
 
 // __dirname en runtime = <root>/out/test ; los fixtures viven en src/test (no se compilan).
 const FIXTURES = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'criticalapp');
@@ -11,6 +14,10 @@ const FIXTURES_CELERY = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixt
 const FIXTURES_REST = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'restapp');
 const FIXTURES_NAV = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'navproj');
 const FIXTURES_DECORATED = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'decoratedapp');
+const FIXTURES_SPLIT = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'splitsettings');
+const FIXTURES_NESTED = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'nestedproj');
+const FIXTURES_DEEP = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'deepproj');
+const FIXTURES_IGNORED_ROOT = path.resolve(__dirname, '..', '..', 'src', 'test', 'fixtures', 'ignoredroot');
 
 describe('DjangoProjectAnalyzer — red de seguridad de parsing (Fase 4)', () => {
   const analyzer = new DjangoProjectAnalyzer();
@@ -248,6 +255,8 @@ describe('DjangoProjectAnalyzer — red de seguridad de parsing (Fase 4)', () =>
       const leaf = urls.find(u => u.viewName === 'views.b_list');
       assert.ok(leaf, 'falta la ruta hoja incluida desde b.urls');
       assert.strictEqual(leaf!.pattern, 'b/lista/', 'la ruta incluida debe llevar el prefijo del path() externo');
+      // Porta el fix de #3: una URL incluida apunta a SU fichero, no al de cabecera.
+      assert.ok(leaf!.filePath.endsWith(path.join('b', 'urls.py')), 'la URL incluida debe apuntar a su propio urls.py');
     });
   });
 
@@ -425,6 +434,138 @@ describe('DjangoProjectAnalyzer — red de seguridad de parsing (Fase 4)', () =>
       const views = await analyzer.extractViews(path.join(FIXTURES_REST, 'views.py'));
       const stats = views.find(v => v.name === 'stats');
       assert.deepStrictEqual(stats?.decorators, ['api_view']);
+    });
+  });
+
+  // findMainUrlsFile debe reconocer el paquete de configuración aunque use un
+  // paquete de settings dividido (config/settings/base.py), no solo settings.py.
+  describe('findMainUrlsFile — paquetes de settings divididos', () => {
+    it('devuelve el urls.py del paquete config con settings/ dividido', async () => {
+      const local = new DjangoProjectAnalyzer();
+      const mainUrls = await local.findMainUrlsFile(FIXTURES_SPLIT);
+      assert.ok(mainUrls, 'debe encontrar el urls.py raíz pese a no haber settings.py plano');
+      assert.ok(
+        mainUrls!.replace(/\\/g, '/').endsWith('splitsettings/config/urls.py'),
+        'debe devolver config/urls.py, no el urls.py de la app'
+      );
+    });
+
+    it('no devuelve el urls.py de una app sin paquete de configuración', async () => {
+      const local = new DjangoProjectAnalyzer();
+      const mainUrls = await local.findMainUrlsFile(FIXTURES_SPLIT);
+      assert.ok(!mainUrls!.replace(/\\/g, '/').includes('blogapp'), 'blogapp/urls.py no es la raíz');
+    });
+  });
+
+  // Localización recursiva de la raíz: manage.py puede vivir en un subdirectorio
+  // (monorepo, proyecto en backend/), no solo en la raíz del workspace.
+  describe('findManagePyDir — búsqueda recursiva de la raíz', () => {
+    it('encuentra manage.py en un subdirectorio anidado (no en la raíz)', () => {
+      const root = findManagePyDir(FIXTURES_NESTED);
+      assert.ok(root, 'debe localizar la raíz anidada');
+      assert.strictEqual(path.basename(root!), 'backend', 'manage.py vive en backend/');
+    });
+
+    it('no desciende a directorios excluidos (dist, node_modules, venv…)', () => {
+      // El único manage.py de este proyecto cuelga de dist/: debe ignorarse.
+      const root = findManagePyDir(FIXTURES_IGNORED_ROOT);
+      assert.strictEqual(root, undefined, 'no debe localizar un manage.py dentro de un directorio excluido');
+    });
+
+    it('respeta el límite de profundidad', () => {
+      // manage.py está a dos niveles (wrap/inner): con maxDepth=1 no se alcanza.
+      assert.strictEqual(findManagePyDir(FIXTURES_DEEP, 1), undefined, 'con profundidad 1 no debe encontrarlo');
+      const root = findManagePyDir(FIXTURES_DEEP);
+      assert.ok(root && path.basename(root) === 'inner', 'con la profundidad por defecto sí debe encontrarlo');
+    });
+
+    it('devuelve undefined si no hay manage.py bajo la raíz', () => {
+      // criticalapp es una app suelta, sin manage.py en su árbol.
+      assert.strictEqual(findManagePyDir(FIXTURES), undefined);
+    });
+  });
+
+  // Exclusión de directorios por .gitignore: el escaneo debe omitir las carpetas
+  // declaradas en el .gitignore del proyecto, además de la lista por defecto.
+  // El escenario se construye en un directorio temporal en runtime: un .gitignore
+  // versionado dentro de los fixtures haría que git ignorase el propio fixture.
+  describe('Exclusión por .gitignore', () => {
+    let tmpRoot: string;
+
+    before(() => {
+      tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dse-gitignore-'));
+      fs.writeFileSync(
+        path.join(tmpRoot, '.gitignore'),
+        // Mezcla deliberada: directorio simple, comentario, glob, negación y ruta
+        // anidada. Solo "secret_app" debe acabar en la lista de exclusión.
+        '# carpetas privadas\nsecret_app/\n*.log\n!keep_this\nnested/dir\n'
+      );
+      for (const app of ['realapp', 'secret_app']) {
+        const appDir = path.join(tmpRoot, app);
+        fs.mkdirSync(appDir, { recursive: true });
+        fs.writeFileSync(path.join(appDir, 'models.py'), 'from django.db import models\n');
+      }
+    });
+
+    after(() => {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    });
+
+    it('por defecto (sin cargar .gitignore) detecta también la app ignorada', async () => {
+      const local = new DjangoProjectAnalyzer();
+      const apps = await local.findDjangoApps(tmpRoot);
+      const names = apps.map(a => path.basename(a));
+      assert.ok(names.includes('realapp'), 'debe detectar la app real');
+      assert.ok(names.includes('secret_app'), 'sin cargar .gitignore, secret_app aún se detecta');
+    });
+
+    it('tras loadIgnorePatterns omite la carpeta declarada en .gitignore', async () => {
+      const local = new DjangoProjectAnalyzer();
+      await local.loadIgnorePatterns(tmpRoot);
+      const apps = await local.findDjangoApps(tmpRoot);
+      const names = apps.map(a => path.basename(a));
+      assert.ok(names.includes('realapp'), 'la app real debe seguir apareciendo');
+      assert.ok(!names.includes('secret_app'), 'secret_app/ está en .gitignore y debe excluirse');
+    });
+
+    it('fusiona el .gitignore de la raíz del workspace con la del proyecto anidado', async () => {
+      // Monorepo: .gitignore en la raíz del workspace, manage.py + apps en backend/.
+      const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'dse-monorepo-'));
+      try {
+        fs.writeFileSync(path.join(ws, '.gitignore'), 'secret_app/\n');
+        const backend = path.join(ws, 'backend');
+        for (const app of ['realapp', 'secret_app']) {
+          const appDir = path.join(backend, app);
+          fs.mkdirSync(appDir, { recursive: true });
+          fs.writeFileSync(path.join(appDir, 'models.py'), 'from django.db import models\n');
+        }
+
+        const local = new DjangoProjectAnalyzer();
+        // El provider pasa [proyecto, raíz(es) del workspace]; aquí lo emulamos.
+        await local.loadIgnorePatterns([backend, ws]);
+        const names = (await local.findDjangoApps(backend)).map(a => path.basename(a));
+        assert.ok(names.includes('realapp'), 'la app real debe aparecer');
+        assert.ok(
+          !names.includes('secret_app'),
+          'la carpeta ignorada en el .gitignore de la raíz del workspace debe excluirse aun con proyecto anidado'
+        );
+      } finally {
+        fs.rmSync(ws, { recursive: true, force: true });
+      }
+    });
+
+    it('loadIgnorePatterns es inocuo si el proyecto no tiene .gitignore', async () => {
+      const local = new DjangoProjectAnalyzer();
+      // FIXTURES_NAV no tiene .gitignore: no debe lanzar ni alterar la detección.
+      await local.loadIgnorePatterns(FIXTURES_NAV);
+      const apps = await local.findDjangoApps(FIXTURES_NAV);
+      assert.ok(apps.some(a => path.basename(a) === 'blog'), 'la app blog debe detectarse igual');
+    });
+
+    it('la lista por defecto cubre los directorios pesados habituales', () => {
+      for (const expected of ['node_modules', 'venv', '.git', '__pycache__', 'migrations']) {
+        assert.ok(DEFAULT_EXCLUDED_DIRS.has(expected), `${expected} debería estar excluido por defecto`);
+      }
     });
   });
 
