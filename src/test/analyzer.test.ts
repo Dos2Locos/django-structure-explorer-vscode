@@ -2,7 +2,7 @@ import * as assert from 'assert';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
-import { DjangoProjectAnalyzer, DEFAULT_EXCLUDED_DIRS } from '../djangoProjectAnalyzer';
+import { DjangoProjectAnalyzer, DEFAULT_EXCLUDED_DIRS, isApiView } from '../djangoProjectAnalyzer';
 import { findManagePyDir, DjangoStructureProvider } from '../djangoStructureProvider';
 
 // __dirname en runtime = <root>/out/test ; los fixtures viven en src/test (no se compilan).
@@ -364,6 +364,24 @@ describe('DjangoProjectAnalyzer — red de seguridad de parsing (Fase 4)', () =>
         assert.strictEqual(byName('ArticleListView')?.apiKind, 'apiview', 'ListAPIView termina en APIView');
         assert.strictEqual(byName('PingView')?.apiKind, 'apiview');
         assert.strictEqual(byName('vista_normal')?.apiKind, undefined, 'una vista normal no debe marcarse');
+      });
+    });
+
+    describe('isApiView — partición Front/API del árbol', () => {
+      it('clasifica como API las vistas DRF y deja en Front las normales', async () => {
+        const views = await analyzer.extractViews(path.join(FIXTURES_REST, 'views.py'));
+        const apiNames = views.filter(isApiView).map(v => v.name);
+        const frontNames = views.filter(v => !isApiView(v)).map(v => v.name);
+
+        // ViewSets / APIView / generics → API
+        assert.ok(apiNames.includes('ArticleViewSet'), 'ArticleViewSet debe ir a API');
+        assert.ok(apiNames.includes('ArticleListView'), 'ListAPIView debe ir a API');
+        assert.ok(apiNames.includes('PingView'), 'APIView debe ir a API');
+        // Función decorada con @api_view → API (aunque no tenga apiKind)
+        assert.ok(apiNames.includes('stats'), '@api_view stats debe ir a API');
+        // Vista normal sin marca ni decorador → Front
+        assert.ok(frontNames.includes('vista_normal'), 'vista_normal debe ir a Front');
+        assert.ok(!apiNames.includes('vista_normal'), 'vista_normal no debe ir a API');
       });
     });
   });

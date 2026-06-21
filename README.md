@@ -17,8 +17,12 @@ A Visual Studio Code extension that provides a PyCharm-like Django project struc
 - **Property Method Support**: Identifies and displays @property methods in models
 - **Django 6 Tasks**: Detects background tasks declared in `tasks.py` with `@task` (from `django.tasks`)
 - **Django 6 Template Partials**: Lists `{% partialdef %}` definitions found in your app templates
+- **Front / API split**: Each app's contents are grouped into two parallel sections instead of a flat list:
+  - **Front**: `Views` (template / function views only), `Templates`, `Partials`, `Forms`
+  - **API**: `API Views` (DRF ViewSets/APIView/generics and `@api_view` functions), `Serializers`, `Schemas`, `Endpoints`
+  - A section only appears when the app has at least one item for it
 - **DRF Serializers**: Lists serializers from `serializers.py`, with the associated model when declared
-- **DRF / django-ninja API**: Per-app "API" node with django-ninja operations (`@api/@router.get/post/...`) and DRF decorator endpoints (`@api_view`, `@action`); ViewSets/APIView are also flagged in the Views node
+- **DRF / django-ninja Endpoints**: "Endpoints" node (under API) with django-ninja operations (`@api/@router.get/post/...`) and DRF decorator endpoints (`@api_view`, `@action`)
 - **django-ninja Schemas**: Lists `Schema` / `ModelSchema` classes from `schemas.py`
 - **Forms**: Lists `Form` / `ModelForm` classes from `forms.py`, with the associated model
 - **Signals**: Lists `@receiver` handlers and custom `Signal()` declarations from `signals.py`

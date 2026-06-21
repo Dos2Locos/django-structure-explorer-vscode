@@ -65,6 +65,17 @@ export interface DjangoView {
   apiKind?: 'viewset' | 'apiview';
   /** Decoradores de nivel superior aplicados a la vista (sin `@`, sin args). */
   decorators?: string[];
+  /** Fichero de origen (`views.py`/`viewsets.py`); lo fija el provider al agrupar. */
+  filePath?: string;
+}
+
+/**
+ * Indica si una vista es de API REST: una clase ViewSet/APIView/generics
+ * (`apiKind`) o una función decorada con `@api_view` (DRF function-based view).
+ * Es la regla que separa la sección "Front" de la sección "API" en el árbol.
+ */
+export function isApiView(view: DjangoView): boolean {
+  return !!view.apiKind || (view.decorators ?? []).includes('api_view');
 }
 
 export interface DjangoUrl {

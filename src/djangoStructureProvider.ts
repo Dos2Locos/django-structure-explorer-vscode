@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { DjangoTreeItem } from './djangoTreeItem';
-import { DjangoProjectAnalyzer, ModelField, DjangoApiEndpoint, DEFAULT_EXCLUDED_DIRS } from './djangoProjectAnalyzer';
+import { DjangoProjectAnalyzer, ModelField, DjangoApiEndpoint, DjangoView, isApiView, DEFAULT_EXCLUDED_DIRS } from './djangoProjectAnalyzer';
 
 /**
  * Busca, en anchura y con profundidad acotada, el primer directorio que contenga
@@ -236,7 +236,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
 
     // Las ramas restantes requieren un resourceUri asociado.
     // Guardamos contra resourceUri ausente en lugar de usar aserciones non-null.
-    const uriContexts = ['app', 'models', 'views', 'urls', 'admin', 'main-urls', 'settings', 'tasks', 'partials', 'templates', 'serializers', 'schemas', 'api', 'forms', 'signals', 'commands', 'celery-tasks'];
+    const uriContexts = ['app', 'models', 'views', 'views-front', 'views-api', 'urls', 'admin', 'main-urls', 'settings', 'tasks', 'partials', 'templates', 'serializers', 'schemas', 'api', 'forms', 'signals', 'commands', 'celery-tasks', 'front-group', 'api-group'];
     if (uriContexts.includes(element.contextValue ?? '')) {
       if (!element.resourceUri) {
         return [];
@@ -249,6 +249,14 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
           return this.getModels(fsPath);
         case 'views':
           return this.getViews(fsPath);
+        case 'views-front':
+        case 'views-api':
+          // Las vistas ya vienen divididas y cacheadas (con su filePath) en el
+          // nodo; basta con renderizarlas sin reparsear.
+          return this.buildViewItems(element.views ?? [], fsPath);
+        case 'front-group':
+        case 'api-group':
+          return element.groupChildren ?? [];
         case 'urls':
         case 'main-urls':
           return this.getUrls(fsPath);
@@ -392,24 +400,6 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       items.push(modelsItem);
     }
 
-    // Views
-    const viewsPath = path.join(appPath, 'views.py');
-    if (await pathExists(viewsPath)) {
-      const viewsItem = new DjangoTreeItem(
-        vscode.l10n.t('Views'),
-        vscode.TreeItemCollapsibleState.Collapsed,
-        {
-          command: 'djangoStructureExplorer.openFile',
-          title: 'Open Views',
-          arguments: [viewsPath]
-        },
-        vscode.Uri.file(viewsPath),
-        'views'
-      );
-      viewsItem.iconPath = new vscode.ThemeIcon('eye');
-      items.push(viewsItem);
-    }
-
     // URLs
     const urlsPath = path.join(appPath, 'urls.py');
     if (await pathExists(urlsPath)) {
@@ -464,20 +454,29 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       items.push(tasksItem);
     }
 
-    // Partials de plantilla (Django 6). Solo se añade el nodo si la app define
-    // alguno; los partials encontrados se cachean en el item para no reescanear.
-    const partials = await this.analyzer.findAppPartials(appPath);
-    if (partials.length > 0) {
-      const partialsItem = new DjangoTreeItem(
-        vscode.l10n.t('Partials'),
+    // Vistas divididas por tipo: las de front (sin marca DRF) van a la sección
+    // "Front" y las de API (ViewSet/APIView/generics) a la sección "API".
+    const { front: frontViews, api: apiViews } = await this.splitAppViews(appPath);
+
+    // ----- Sección Front: vistas de plantilla, templates, partials y forms -----
+    const frontChildren: DjangoTreeItem[] = [];
+
+    const viewsPath = path.join(appPath, 'views.py');
+    if (frontViews.length > 0) {
+      const viewsItem = new DjangoTreeItem(
+        vscode.l10n.t('Views'),
         vscode.TreeItemCollapsibleState.Collapsed,
-        undefined,
-        vscode.Uri.file(appPath),
-        'partials'
+        {
+          command: 'djangoStructureExplorer.openFile',
+          title: 'Open Views',
+          arguments: [viewsPath]
+        },
+        vscode.Uri.file(viewsPath),
+        'views-front'
       );
-      partialsItem.iconPath = new vscode.ThemeIcon('symbol-snippet');
-      partialsItem.partials = partials;
-      items.push(partialsItem);
+      viewsItem.iconPath = new vscode.ThemeIcon('eye');
+      viewsItem.views = frontViews;
+      frontChildren.push(viewsItem);
     }
 
     // Templates (.html de la app)
@@ -491,70 +490,23 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
         'templates'
       );
       templatesItem.iconPath = new vscode.ThemeIcon('file-directory');
-      items.push(templatesItem);
+      frontChildren.push(templatesItem);
     }
 
-    // Serializers de DRF (serializers.py)
-    const serializersPath = path.join(appPath, 'serializers.py');
-    if (await pathExists(serializersPath)) {
-      const serializersItem = new DjangoTreeItem(
-        vscode.l10n.t('Serializers'),
-        vscode.TreeItemCollapsibleState.Collapsed,
-        {
-          command: 'djangoStructureExplorer.openFile',
-          title: 'Open Serializers',
-          arguments: [serializersPath]
-        },
-        vscode.Uri.file(serializersPath),
-        'serializers'
-      );
-      serializersItem.iconPath = new vscode.ThemeIcon('symbol-class');
-      items.push(serializersItem);
-    }
-
-    // Schemas de django-ninja (schemas.py)
-    const schemasPath = path.join(appPath, 'schemas.py');
-    if (await pathExists(schemasPath)) {
-      const schemasItem = new DjangoTreeItem(
-        vscode.l10n.t('Schemas'),
-        vscode.TreeItemCollapsibleState.Collapsed,
-        {
-          command: 'djangoStructureExplorer.openFile',
-          title: 'Open Schemas',
-          arguments: [schemasPath]
-        },
-        vscode.Uri.file(schemasPath),
-        'schemas'
-      );
-      schemasItem.iconPath = new vscode.ThemeIcon('symbol-interface');
-      items.push(schemasItem);
-    }
-
-    // API REST: endpoints de django-ninja (api.py) + DRF basados en decorador
-    // (@api_view/@action en views.py/viewsets.py). Los router.register() de DRF
-    // ya se muestran en el nodo URLs.
-    const apiEndpoints: DjangoApiEndpoint[] = [];
-    const apiPath = path.join(appPath, 'api.py');
-    if (await pathExists(apiPath)) {
-      apiEndpoints.push(...await this.analyzer.extractNinjaEndpoints(apiPath));
-    }
-    for (const drfFile of ['views.py', 'viewsets.py']) {
-      const drfPath = path.join(appPath, drfFile);
-      if (await pathExists(drfPath)) {
-        apiEndpoints.push(...await this.analyzer.extractDrfEndpoints(drfPath));
-      }
-    }
-    if (apiEndpoints.length > 0) {
-      const apiItem = new DjangoTreeItem(
-        vscode.l10n.t('API'),
+    // Partials de plantilla (Django 6). Solo se añade el nodo si la app define
+    // alguno; los partials encontrados se cachean en el item para no reescanear.
+    const partials = await this.analyzer.findAppPartials(appPath);
+    if (partials.length > 0) {
+      const partialsItem = new DjangoTreeItem(
+        vscode.l10n.t('Partials'),
         vscode.TreeItemCollapsibleState.Collapsed,
         undefined,
         vscode.Uri.file(appPath),
-        'api'
+        'partials'
       );
-      apiItem.iconPath = new vscode.ThemeIcon('plug');
-      apiItem.apiEndpoints = apiEndpoints;
-      items.push(apiItem);
+      partialsItem.iconPath = new vscode.ThemeIcon('symbol-snippet');
+      partialsItem.partials = partials;
+      frontChildren.push(partialsItem);
     }
 
     // Forms (forms.py)
@@ -572,7 +524,112 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
         'forms'
       );
       formsItem.iconPath = new vscode.ThemeIcon('symbol-structure');
-      items.push(formsItem);
+      frontChildren.push(formsItem);
+    }
+
+    if (frontChildren.length > 0) {
+      const frontItem = new DjangoTreeItem(
+        vscode.l10n.t('Front'),
+        vscode.TreeItemCollapsibleState.Expanded,
+        undefined,
+        vscode.Uri.file(appPath),
+        'front-group'
+      );
+      frontItem.iconPath = new vscode.ThemeIcon('browser');
+      frontItem.groupChildren = frontChildren;
+      items.push(frontItem);
+    }
+
+    // ----- Sección API: vistas API, serializers, schemas y endpoints REST -----
+    const apiChildren: DjangoTreeItem[] = [];
+
+    if (apiViews.length > 0) {
+      const apiViewsItem = new DjangoTreeItem(
+        vscode.l10n.t('API Views'),
+        vscode.TreeItemCollapsibleState.Collapsed,
+        undefined,
+        vscode.Uri.file(appPath),
+        'views-api'
+      );
+      apiViewsItem.iconPath = new vscode.ThemeIcon('symbol-interface');
+      apiViewsItem.views = apiViews;
+      apiChildren.push(apiViewsItem);
+    }
+
+    // Serializers de DRF (serializers.py)
+    const serializersPath = path.join(appPath, 'serializers.py');
+    if (await pathExists(serializersPath)) {
+      const serializersItem = new DjangoTreeItem(
+        vscode.l10n.t('Serializers'),
+        vscode.TreeItemCollapsibleState.Collapsed,
+        {
+          command: 'djangoStructureExplorer.openFile',
+          title: 'Open Serializers',
+          arguments: [serializersPath]
+        },
+        vscode.Uri.file(serializersPath),
+        'serializers'
+      );
+      serializersItem.iconPath = new vscode.ThemeIcon('symbol-class');
+      apiChildren.push(serializersItem);
+    }
+
+    // Schemas de django-ninja (schemas.py)
+    const schemasPath = path.join(appPath, 'schemas.py');
+    if (await pathExists(schemasPath)) {
+      const schemasItem = new DjangoTreeItem(
+        vscode.l10n.t('Schemas'),
+        vscode.TreeItemCollapsibleState.Collapsed,
+        {
+          command: 'djangoStructureExplorer.openFile',
+          title: 'Open Schemas',
+          arguments: [schemasPath]
+        },
+        vscode.Uri.file(schemasPath),
+        'schemas'
+      );
+      schemasItem.iconPath = new vscode.ThemeIcon('symbol-interface');
+      apiChildren.push(schemasItem);
+    }
+
+    // Endpoints REST: django-ninja (api.py) + DRF basados en decorador
+    // (@api_view/@action en views.py/viewsets.py). Los router.register() de DRF
+    // ya se muestran en el nodo URLs.
+    const apiEndpoints: DjangoApiEndpoint[] = [];
+    const apiPath = path.join(appPath, 'api.py');
+    if (await pathExists(apiPath)) {
+      apiEndpoints.push(...await this.analyzer.extractNinjaEndpoints(apiPath));
+    }
+    for (const drfFile of ['views.py', 'viewsets.py']) {
+      const drfPath = path.join(appPath, drfFile);
+      if (await pathExists(drfPath)) {
+        apiEndpoints.push(...await this.analyzer.extractDrfEndpoints(drfPath));
+      }
+    }
+    if (apiEndpoints.length > 0) {
+      const apiItem = new DjangoTreeItem(
+        vscode.l10n.t('Endpoints'),
+        vscode.TreeItemCollapsibleState.Collapsed,
+        undefined,
+        vscode.Uri.file(appPath),
+        'api'
+      );
+      apiItem.iconPath = new vscode.ThemeIcon('plug');
+      apiItem.apiEndpoints = apiEndpoints;
+      apiChildren.push(apiItem);
+    }
+
+    if (apiChildren.length > 0) {
+      const apiGroupItem = new DjangoTreeItem(
+        vscode.l10n.t('API'),
+        vscode.TreeItemCollapsibleState.Expanded,
+        undefined,
+        vscode.Uri.file(appPath),
+        'api-group'
+      );
+      apiGroupItem.iconPath = new vscode.ThemeIcon('plug');
+      apiGroupItem.groupChildren = apiChildren;
+      items.push(apiGroupItem);
     }
 
     // Signals (signals.py)
@@ -668,16 +725,44 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
 
   private async getViews(viewsPath: string): Promise<DjangoTreeItem[]> {
     const views = await this.analyzer.extractViews(viewsPath);
+    return this.buildViewItems(views, viewsPath);
+  }
+
+  /**
+   * Divide las vistas de la app en front (sin marca DRF) y API (ViewSet/APIView/
+   * generics), parseando `views.py` y `viewsets.py`. Cada vista conserva su
+   * `filePath` de origen para abrir el fichero correcto al hacer clic.
+   */
+  private async splitAppViews(appPath: string): Promise<{ front: DjangoView[]; api: DjangoView[] }> {
+    const collected: DjangoView[] = [];
+    for (const file of ['views.py', 'viewsets.py']) {
+      const filePath = path.join(appPath, file);
+      if (await pathExists(filePath)) {
+        const views = await this.analyzer.extractViews(filePath);
+        for (const view of views) {
+          collected.push({ ...view, filePath });
+        }
+      }
+    }
+    return {
+      front: collected.filter(view => !isApiView(view)),
+      api: collected.filter(view => isApiView(view))
+    };
+  }
+
+  /** Construye los items de árbol para una lista de vistas ya resuelta. */
+  private buildViewItems(views: DjangoView[], fallbackPath: string): DjangoTreeItem[] {
     const items = views.map(view => {
+      const filePath = view.filePath ?? fallbackPath;
       const viewItem = new DjangoTreeItem(
         view.name,
         vscode.TreeItemCollapsibleState.None,
         {
           command: 'djangoStructureExplorer.openFile',
           title: 'Open View',
-          arguments: [viewsPath, view.lineNumber]
+          arguments: [filePath, view.lineNumber]
         },
-        vscode.Uri.file(viewsPath),
+        vscode.Uri.file(filePath),
         'view'
       );
       viewItem.iconPath = view.isClass
