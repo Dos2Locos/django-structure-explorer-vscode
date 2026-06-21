@@ -37,6 +37,17 @@ Con tests en `src/test/analyzer.test.ts` (fixtures `robustness/`) salvo los defe
 
 ### MEDIUM
 
+- **Modernizar el tooling de dev para cerrar las vulnerabilidades restantes de
+  `npm audit`.** Tras el `npm audit fix` no disruptivo (subió `minimatch` a 3.1.5,
+  cerrando la ReDoS high) quedan 8 vulnerabilidades, todas en `devDependencies` y
+  solo resolubles con bumps mayores:
+  - **`mocha`** arrastra `serialize-javascript` (high, RCE/DoS) y `diff` (low, DoS).
+  - **`eslint` 7** arrastra `js-yaml` (moderate, DoS) y la cadena
+    `@eslint/eslintrc` / `@typescript-eslint/*`.
+  Requiere migrar a `eslint` 9/10 (flat config) + `@typescript-eslint` 8 y subir
+  `mocha`. Riesgo de regresión en lint/test, por eso se aborda como tarea propia.
+  Sin impacto para el usuario: el `.vsix` solo empaqueta producción
+  (`tree-sitter-wasms`, `web-tree-sitter`), que están limpias.
 - **`django-ninja-extra`: controllers basados en clase no se detectan.** El
   análisis de endpoints de django-ninja (`extractNinjaEndpoints`) solo cubre las
   operaciones por **función** decoradas `@api.<método>` / `@router.<método>`. Los
