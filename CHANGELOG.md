@@ -1,8 +1,19 @@
 # Changelog
 
-Todas las novedades relevantes de la extensión se documentan en este archivo.
-El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/)
-y el proyecto se adhiere a [Versionado Semántico](https://semver.org/lang/es/).
+All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
+
+## [1.7.0](https://github.com/Dos2Locos/django-structure-explorer-vscode/compare/v1.6.0...v1.7.0) (2026-06-21)
+
+
+### Features
+
+* separa el árbol de cada app en secciones Front y API ([651b0c1](https://github.com/Dos2Locos/django-structure-explorer-vscode/commit/651b0c184dfcb7c4d955146b35bff5985dca2ed0))
+
+
+### Bug Fixes
+
+* **deps:** regenera package-lock en sync con package.json para npm ci ([#18](https://github.com/Dos2Locos/django-structure-explorer-vscode/issues/18)) ([a89fc71](https://github.com/Dos2Locos/django-structure-explorer-vscode/commit/a89fc7125ffa0213dd40de111934e1f2daf9b4f1))
+* viewsets.py solo aporta vistas de API, no helpers a Front ([31915eb](https://github.com/Dos2Locos/django-structure-explorer-vscode/commit/31915eba6a06bf7f65339138b63bf0511cb22884))
 
 ## [1.6.0] - 2026-06-20
 
