@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { DjangoTreeItem } from './djangoTreeItem';
-import { DjangoProjectAnalyzer, ModelField, DjangoApiEndpoint, DjangoView, isApiView, DEFAULT_EXCLUDED_DIRS } from './djangoProjectAnalyzer';
+import { DjangoProjectAnalyzer, ModelField, DjangoApiEndpoint, DjangoView, isApiView, partitionAppViews, DEFAULT_EXCLUDED_DIRS } from './djangoProjectAnalyzer';
 
 /**
  * Busca, en anchura y con profundidad acotada, el primer directorio que contenga
@@ -744,10 +744,7 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
         }
       }
     }
-    return {
-      front: collected.filter(view => !isApiView(view)),
-      api: collected.filter(view => isApiView(view))
-    };
+    return partitionAppViews(collected);
   }
 
   /** Construye los items de árbol para una lista de vistas ya resuelta. */
