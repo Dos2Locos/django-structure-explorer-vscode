@@ -400,22 +400,15 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       items.push(modelsItem);
     }
 
-    // URLs
-    const urlsPath = path.join(appPath, 'urls.py');
-    if (await pathExists(urlsPath)) {
-      const urlsItem = new DjangoTreeItem(
-        vscode.l10n.t('URLs'),
-        vscode.TreeItemCollapsibleState.Collapsed,
-        {
-          command: 'djangoStructureExplorer.openFile',
-          title: 'Open URLs',
-          arguments: [urlsPath]
-        },
-        vscode.Uri.file(urlsPath),
-        'urls'
-      );
-      urlsItem.iconPath = new vscode.ThemeIcon('link');
-      items.push(urlsItem);
+    // URLs: Django no obliga a que las rutas vivan en `urls.py`. Es habitual
+    // separarlas por dominio (`api_urls.py`, `urls_v2.py`) o usar un paquete
+    // `urls/`. Se descubren todos los ficheros de rutas de la app; los de nombre
+    // "api" se muestran como "API URLs" dentro de la sección API (más abajo) y
+    // el resto como nodos URLs a nivel de app.
+    const urlFiles = await this.findAppUrlFiles(appPath);
+    const apiUrlFiles = urlFiles.filter(file => this.isApiUrlFile(file));
+    for (const urlFile of urlFiles.filter(file => !this.isApiUrlFile(file))) {
+      items.push(this.buildUrlsNode(urlFile, appPath, vscode.l10n.t('URLs')));
     }
 
     // Admin
@@ -617,6 +610,12 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
       apiItem.iconPath = new vscode.ThemeIcon('plug');
       apiItem.apiEndpoints = apiEndpoints;
       apiChildren.push(apiItem);
+    }
+
+    // Ficheros de rutas de nombre "api" (api_urls.py, urls/api.py…): sus rutas
+    // (path/re_path/router.register) se muestran como un nodo dentro de la API.
+    for (const apiUrlFile of apiUrlFiles) {
+      apiChildren.push(this.buildUrlsNode(apiUrlFile, appPath, vscode.l10n.t('API URLs')));
     }
 
     if (apiChildren.length > 0) {
@@ -999,6 +998,70 @@ export class DjangoStructureProvider implements vscode.TreeDataProvider<DjangoTr
     });
 
     return this.finalizeItems(items);
+  }
+
+  /**
+   * Descubre los ficheros de rutas de una app. Django no obliga a que se llamen
+   * `urls.py`: es común separar por dominio (`api_urls.py`, `urls_v2.py`) o usar
+   * un paquete `urls/`. Se detecta cualquier `*urls*.py` de nivel superior y los
+   * `.py` de un subdirectorio `urls/`. No lanza ante errores de I/O.
+   */
+  private async findAppUrlFiles(appPath: string): Promise<string[]> {
+    const found: string[] = [];
+    const looksLikeUrlFile = (name: string): boolean => /urls/i.test(name) && name.endsWith('.py');
+    try {
+      const entries = await fs.promises.readdir(appPath, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isFile() && looksLikeUrlFile(entry.name)) {
+          found.push(path.join(appPath, entry.name));
+        } else if (entry.isDirectory() && entry.name === 'urls') {
+          // Paquete urls/: cada .py define rutas (urls/__init__.py, urls/api.py…).
+          try {
+            const sub = await fs.promises.readdir(path.join(appPath, 'urls'), { withFileTypes: true });
+            for (const file of sub) {
+              if (file.isFile() && file.name.endsWith('.py')) {
+                found.push(path.join(appPath, 'urls', file.name));
+              }
+            }
+          } catch {
+            // Subdirectorio sin permisos: se omite sin interrumpir el escaneo.
+          }
+        }
+      }
+    } catch {
+      // App sin permisos de lectura: se devuelve lo recolectado hasta ahora.
+    }
+    return found.sort();
+  }
+
+  /** Un fichero de rutas es de API si su nombre (sin .py) contiene "api". */
+  private isApiUrlFile(filePath: string): boolean {
+    return /api/i.test(path.basename(filePath, '.py'));
+  }
+
+  /**
+   * Construye un nodo URLs para un fichero de rutas concreto. La etiqueta base
+   * la fija el caller ("URLs" o "API URLs"); cuando no es el `urls.py` canónico,
+   * el fichero (relativo a la app) va en la descripción para desambiguar.
+   */
+  private buildUrlsNode(filePath: string, appPath: string, baseLabel: string): DjangoTreeItem {
+    const rel = path.relative(appPath, filePath);
+    const node = new DjangoTreeItem(
+      baseLabel,
+      vscode.TreeItemCollapsibleState.Collapsed,
+      {
+        command: 'djangoStructureExplorer.openFile',
+        title: 'Open URLs',
+        arguments: [filePath]
+      },
+      vscode.Uri.file(filePath),
+      'urls'
+    );
+    node.iconPath = new vscode.ThemeIcon('link');
+    if (rel !== 'urls.py') {
+      node.description = rel;
+    }
+    return node;
   }
 
   private async getUrls(urlsPath: string): Promise<DjangoTreeItem[]> {

@@ -12,14 +12,14 @@ A Visual Studio Code extension that provides a PyCharm-like Django project struc
 - **`.gitignore`-Aware Scanning**: Skips heavy directories (dependencies, virtualenvs, caches) and also honors the folders declared in your project's `.gitignore`, keeping the tree focused on real source
 - **Model Field Explorer**: View detailed information about model fields and their types
 - **Admin Class Detection**: Navigate to admin classes and their associated models
-- **URL Patterns**: Explore URL patterns and their associated views
+- **URL Patterns**: Explore URL patterns and their associated views. URL files are discovered by name, not only `urls.py` — `api_urls.py`, `urls_v2.py` and a `urls/` package are all picked up (files named like `*api*` appear under the API section as "API URLs")
 - **Settings Explorer**: Browse through your Django settings
 - **Property Method Support**: Identifies and displays @property methods in models
 - **Django 6 Tasks**: Detects background tasks declared in `tasks.py` with `@task` (from `django.tasks`)
 - **Django 6 Template Partials**: Lists `{% partialdef %}` definitions found in your app templates
 - **Front / API split**: Each app's contents are grouped into two parallel sections instead of a flat list:
   - **Front**: `Views` (template / function views only), `Templates`, `Partials`, `Forms`
-  - **API**: `API Views` (DRF ViewSets/APIView/generics and `@api_view` functions), `Serializers`, `Schemas`, `Endpoints`
+  - **API**: `API Views` (DRF ViewSets/APIView/generics and `@api_view` functions), `Serializers`, `Schemas`, `Endpoints`, `API URLs` (routes from `api_urls.py` and similar)
   - A section only appears when the app has at least one item for it
 - **DRF Serializers**: Lists serializers from `serializers.py`, with the associated model when declared
 - **DRF / django-ninja Endpoints**: "Endpoints" node (under API) with django-ninja operations (`@api/@router.get/post/...`) and DRF decorator endpoints (`@api_view`, `@action`)
