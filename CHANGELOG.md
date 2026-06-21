@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.8.0](https://github.com/Dos2Locos/django-structure-explorer-vscode/compare/v1.7.0...v1.8.0) (2026-06-21)
+
+
+### Features
+
+* descubre ficheros de rutas por nombre, no solo urls.py ([#21](https://github.com/Dos2Locos/django-structure-explorer-vscode/issues/21)) ([b14396b](https://github.com/Dos2Locos/django-structure-explorer-vscode/commit/b14396b10cec552a84658fa9144b0b49e8b4b191))
+
 ## [1.7.0](https://github.com/Dos2Locos/django-structure-explorer-vscode/compare/v1.6.0...v1.7.0) (2026-06-21)
 
 
