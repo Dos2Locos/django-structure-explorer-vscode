@@ -385,6 +385,15 @@ describe('DjangoProjectAnalyzer — red de seguridad de parsing (Fase 4)', () =>
       });
     });
 
+    describe('extractUrls — ficheros de rutas con nombre alternativo', () => {
+      it('extrae rutas de un api_urls.py (path y router.register), no solo de urls.py', async () => {
+        const urls = await analyzer.extractUrls(path.join(FIXTURES_REST, 'api_urls.py'));
+        const patterns = urls.map(u => u.pattern);
+        assert.ok(patterns.includes('stats/'), 'debe extraer la ruta path("stats/")');
+        assert.ok(patterns.includes('articles'), 'debe extraer el prefijo de router.register("articles")');
+      });
+    });
+
     describe('partitionAppViews — reparto Front/API por fichero', () => {
       it('manda a Front solo lo de views.py y descarta los helpers de viewsets.py', () => {
         const views: DjangoView[] = [
