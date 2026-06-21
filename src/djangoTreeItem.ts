@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ModelField, DjangoPartial, DjangoApiEndpoint } from './djangoProjectAnalyzer';
+import { ModelField, DjangoPartial, DjangoApiEndpoint, DjangoView } from './djangoProjectAnalyzer';
 
 export class DjangoTreeItem extends vscode.TreeItem {
   /**
@@ -19,6 +19,19 @@ export class DjangoTreeItem extends vscode.TreeItem {
    * de la app, para no reescanear varios ficheros al expandir.
    */
   public apiEndpoints?: DjangoApiEndpoint[];
+
+  /**
+   * Vistas (ya divididas en front/API por `apiKind`) cacheadas en los nodos
+   * 'views-front' y 'views-api' para no reparsear `views.py`/`viewsets.py` al
+   * expandir. Cada vista lleva su `filePath` de origen.
+   */
+  public views?: DjangoView[];
+
+  /**
+   * Nodos-categoría hijos cacheados en los nodos de agrupación 'front-group' y
+   * 'api-group'. Se construyen al armar la app y se devuelven tal cual al expandir.
+   */
+  public groupChildren?: DjangoTreeItem[];
 
   constructor(
     public readonly label: string,

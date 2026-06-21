@@ -2,7 +2,7 @@ import * as assert from 'assert';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
-import { DjangoProjectAnalyzer, DEFAULT_EXCLUDED_DIRS } from '../djangoProjectAnalyzer';
+import { DjangoProjectAnalyzer, DEFAULT_EXCLUDED_DIRS, isApiView, partitionAppViews, DjangoView } from '../djangoProjectAnalyzer';
 import { findManagePyDir, DjangoStructureProvider } from '../djangoStructureProvider';
 
 // __dirname en runtime = <root>/out/test ; los fixtures viven en src/test (no se compilan).
@@ -364,6 +364,43 @@ describe('DjangoProjectAnalyzer — red de seguridad de parsing (Fase 4)', () =>
         assert.strictEqual(byName('ArticleListView')?.apiKind, 'apiview', 'ListAPIView termina en APIView');
         assert.strictEqual(byName('PingView')?.apiKind, 'apiview');
         assert.strictEqual(byName('vista_normal')?.apiKind, undefined, 'una vista normal no debe marcarse');
+      });
+    });
+
+    describe('isApiView — partición Front/API del árbol', () => {
+      it('clasifica como API las vistas DRF y deja en Front las normales', async () => {
+        const views = await analyzer.extractViews(path.join(FIXTURES_REST, 'views.py'));
+        const apiNames = views.filter(isApiView).map(v => v.name);
+        const frontNames = views.filter(v => !isApiView(v)).map(v => v.name);
+
+        // ViewSets / APIView / generics → API
+        assert.ok(apiNames.includes('ArticleViewSet'), 'ArticleViewSet debe ir a API');
+        assert.ok(apiNames.includes('ArticleListView'), 'ListAPIView debe ir a API');
+        assert.ok(apiNames.includes('PingView'), 'APIView debe ir a API');
+        // Función decorada con @api_view → API (aunque no tenga apiKind)
+        assert.ok(apiNames.includes('stats'), '@api_view stats debe ir a API');
+        // Vista normal sin marca ni decorador → Front
+        assert.ok(frontNames.includes('vista_normal'), 'vista_normal debe ir a Front');
+        assert.ok(!apiNames.includes('vista_normal'), 'vista_normal no debe ir a API');
+      });
+    });
+
+    describe('partitionAppViews — reparto Front/API por fichero', () => {
+      it('manda a Front solo lo de views.py y descarta los helpers de viewsets.py', () => {
+        const views: DjangoView[] = [
+          { name: 'HomeView', lineNumber: 1, isClass: true, filePath: '/app/views.py' },
+          { name: 'stats', lineNumber: 9, isClass: false, decorators: ['api_view'], filePath: '/app/views.py' },
+          { name: 'ArticleViewSet', lineNumber: 1, isClass: true, apiKind: 'viewset', filePath: '/app/viewsets.py' },
+          // Helper/mixin en viewsets.py: ni front ni API → se descarta.
+          { name: 'AuditMixin', lineNumber: 20, isClass: true, filePath: '/app/viewsets.py' }
+        ];
+        const { front, api } = partitionAppViews(views);
+        const frontNames = front.map(v => v.name);
+        const apiNames = api.map(v => v.name);
+
+        assert.deepStrictEqual(frontNames, ['HomeView'], 'Front solo debe contener vistas de views.py');
+        assert.ok(apiNames.includes('ArticleViewSet') && apiNames.includes('stats'), 'API debe incluir el ViewSet y la función @api_view');
+        assert.ok(!frontNames.includes('AuditMixin') && !apiNames.includes('AuditMixin'), 'el helper de viewsets.py no debe aparecer en ninguna sección');
       });
     });
   });

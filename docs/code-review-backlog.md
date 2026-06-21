@@ -37,6 +37,32 @@ Con tests en `src/test/analyzer.test.ts` (fixtures `robustness/`) salvo los defe
 
 ### MEDIUM
 
+- **Modernizar el tooling de dev para cerrar las vulnerabilidades restantes de
+  `npm audit`.** Tras el `npm audit fix` no disruptivo (subió `minimatch` a 3.1.5,
+  cerrando la ReDoS high) quedan 8 vulnerabilidades, todas en `devDependencies` y
+  solo resolubles con bumps mayores:
+  - **`mocha`** arrastra `serialize-javascript` (high, RCE/DoS) y `diff` (low, DoS).
+  - **`eslint` 7** arrastra `js-yaml` (moderate, DoS) y la cadena
+    `@eslint/eslintrc` / `@typescript-eslint/*`.
+  Requiere migrar a `eslint` 9/10 (flat config) + `@typescript-eslint` 8 y subir
+  `mocha`. Riesgo de regresión en lint/test, por eso se aborda como tarea propia.
+  Sin impacto para el usuario: el `.vsix` solo empaqueta producción
+  (`tree-sitter-wasms`, `web-tree-sitter`), que están limpias.
+- **`django-ninja-extra`: controllers basados en clase no se detectan.** El
+  análisis de endpoints de django-ninja (`extractNinjaEndpoints`) solo cubre las
+  operaciones por **función** decoradas `@api.<método>` / `@router.<método>`. Los
+  proyectos que usan `django-ninja-extra` declaran la API con clases
+  `@api_controller(...)` que heredan de `ControllerBase` y métodos decorados
+  `@route.get/post/...` (o `@http_get`, etc.). Propuesta: nuevo extractor que
+  detecte clases con decorador `api_controller` y recorra sus métodos `@route.*`,
+  emitiendo `DjangoApiEndpoint` con `framework: 'ninja'`; mostrarlos bajo el nodo
+  "Endpoints" de la sección API. Requiere fixture `ninjaextraapp/` con un
+  controller y tests análogos a `extractNinjaEndpoints`.
+- **Verificación del objeto decorador en ninja.** `extractNinjaEndpoints`
+  identifica el endpoint solo por el nombre del método HTTP (`get`/`post`/…) del
+  decorador `@x.get(...)`, sin comprobar que `x` sea un `NinjaAPI`/`Router`. En la
+  práctica funciona, pero teóricamente capturaría un `@algo.get(...)` ajeno a
+  ninja. Acotar siguiendo las asignaciones `x = NinjaAPI()/Router()` del módulo.
 - **Manejo de errores: `[]` vs "falló".** Los extractores devuelven `[]` tanto
   si no hay resultados como si el parseo falló (tras `reportError`). Los callers
   no pueden distinguirlos ni marcar el nodo con estado de error. Opción: que los
@@ -103,6 +129,16 @@ detecta por el patrón `models.\w+`.
 - **✅ Marcado de ViewSets/APIView.** `extractViews` clasifica las clases cuyo base
   termina en `ViewSet` o `APIView` (incluye generics tipo `ListAPIView`); el provider
   las muestra con descripción "DRF ViewSet"/"DRF APIView" e icono distinto.
+- **✅ Secciones "Front" y "API" por app.** El provider agrupa el contenido de cada
+  app en dos nodos paralelos en lugar de una lista plana:
+  - **Front**: `Views` (solo vistas de plantilla/función), `Templates`, `Partials`,
+    `Forms`.
+  - **API**: `API Views` (ViewSets/APIView/generics y funciones `@api_view`),
+    `Serializers`, `Schemas`, `Endpoints`.
+  La partición Front/API la decide `isApiView(view)` (`djangoProjectAnalyzer.ts`):
+  una vista es de API si tiene `apiKind` o lleva el decorador `@api_view`. Cada
+  grupo solo se muestra si tiene al menos un hijo. Cubierto por
+  `isApiView — partición Front/API del árbol` en `analyzer.test.ts`.
 
 Limitaciones conocidas (LOW): un `@action(...)` repartido en varias líneas solo
 lee `methods`/`url_path` de la primera línea; los schemas/serializers definidos en

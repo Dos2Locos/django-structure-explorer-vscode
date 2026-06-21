@@ -65,6 +65,39 @@ export interface DjangoView {
   apiKind?: 'viewset' | 'apiview';
   /** Decoradores de nivel superior aplicados a la vista (sin `@`, sin args). */
   decorators?: string[];
+  /** Fichero de origen (`views.py`/`viewsets.py`); lo fija el provider al agrupar. */
+  filePath?: string;
+}
+
+/**
+ * Indica si una vista es de API REST: una clase ViewSet/APIView/generics
+ * (`apiKind`) o una función decorada con `@api_view` (DRF function-based view).
+ * Es la regla que separa la sección "Front" de la sección "API" en el árbol.
+ */
+export function isApiView(view: DjangoView): boolean {
+  return !!view.apiKind || (view.decorators ?? []).includes('api_view');
+}
+
+/**
+ * Reparte una lista de vistas (cada una con su `filePath` de origen) en las
+ * secciones Front y API del árbol:
+ * - **API**: cualquier vista de API (`isApiView`), venga de `views.py` o
+ *   `viewsets.py`.
+ * - **Front**: solo símbolos no-API de `views.py`. Los símbolos no-API de
+ *   `viewsets.py` (helpers/mixins, p. ej. `class AuditMixin`) no son vistas de
+ *   front y se descartan de ambas secciones: `viewsets.py` solo aporta API.
+ */
+export function partitionAppViews(views: DjangoView[]): { front: DjangoView[]; api: DjangoView[] } {
+  const front: DjangoView[] = [];
+  const api: DjangoView[] = [];
+  for (const view of views) {
+    if (isApiView(view)) {
+      api.push(view);
+    } else if (view.filePath && path.basename(view.filePath) === 'views.py') {
+      front.push(view);
+    }
+  }
+  return { front, api };
 }
 
 export interface DjangoUrl {
