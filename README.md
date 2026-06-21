@@ -1,6 +1,6 @@
 # Django Structure Explorer
 
-![Django Structure Explorer](https://raw.githubusercontent.com/Dos2Locos/django-structure-explorer-vscode/main/images/icon.png)
+![Django Structure Explorer](https://raw.githubusercontent.com/Dos2Locos/django-structure-explorer-vscode/main/resources/django.png)
 
 A Visual Studio Code extension that provides a PyCharm-like Django project structure explorer, making it easier to navigate and understand your Django projects.
 
