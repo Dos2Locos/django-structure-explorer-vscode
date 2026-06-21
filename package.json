@@ -150,17 +150,31 @@
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
-    "test": "mocha"
+    "test": "mocha",
+    "commit": "cz",
+    "release": "commit-and-tag-version --skip.tag",
+    "prepare": "husky"
+  },
+  "config": {
+    "commitizen": {
+      "path": "cz-conventional-changelog"
+    }
   },
   "devDependencies": {
+    "@commitlint/cli": "^21.0.2",
+    "@commitlint/config-conventional": "^21.0.2",
     "@types/glob": "^7.1.3",
     "@types/mocha": "^8.2.2",
     "@types/node": "14.x",
     "@types/vscode": "^1.73.0",
     "@typescript-eslint/eslint-plugin": "^4.26.0",
     "@typescript-eslint/parser": "^4.26.0",
+    "commit-and-tag-version": "^12.7.3",
+    "commitizen": "^4.3.2",
+    "cz-conventional-changelog": "^3.3.0",
     "eslint": "^7.27.0",
     "glob": "^7.1.7",
+    "husky": "^9.1.7",
     "mocha": "^11.1.0",
     "typescript": "^4.3.2"
   },

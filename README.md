@@ -131,6 +131,14 @@ Contributions are welcome! To contribute to this extension:
 5. Test your changes by pressing F5 to launch a new VS Code window with the extension loaded
 6. Submit a pull request
 
+### Commits and versioning
+
+This project uses [Conventional Commits](https://www.conventionalcommits.org/):
+
+- **Write commits** with `npm run commit` (Commitizen prompt) or by hand following the `type: description` format (`feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `ci`, `perf`…).
+- A **husky `commit-msg` hook** runs commitlint and **rejects non-conventional messages**.
+- **Versioning** is derived from the commits, not done by hand. Run `npm run release` (`commit-and-tag-version`) before merging a release PR: it bumps `package.json` (`feat` → minor, `fix` → patch, `BREAKING CHANGE` → major), updates `CHANGELOG.md` and creates the release commit. The git tag and Marketplace publish are handled by the `publish.yml` workflow on merge to `main`.
+
 ## License
 
 This extension is licensed under the [MIT License](LICENSE.md).
